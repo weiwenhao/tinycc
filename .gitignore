@@ -1,7 +1,9 @@
+/tmp
 *~
 \#*
 .#*
 *.o
+.idea
 *.a
 *.exe
 *.dll
