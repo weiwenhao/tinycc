@@ -630,14 +630,18 @@ ST_FUNC int set_elf_sym(Section *s, addr_t value, unsigned long size,
     sym_vis = ELFW(ST_VISIBILITY)(other);
 
     if (sym_bind != STB_LOCAL) {
+        // 全局搜索符号是否已经定义
         /* we search global or weak symbols */
         sym_index = find_elf_sym(s, name);
-        if (!sym_index)
+        if (!sym_index) { // sym_index == 0, 表示没有找到
             goto do_def;
+        }
+
+        // exist sym table
         esym = &((ElfW(Sym) *) s->data)[sym_index];
         if (esym->st_value == value && esym->st_size == size && esym->st_info == info
             && esym->st_other == other && esym->st_shndx == shndx)
-            return sym_index;
+            return sym_index; // 完全一样的符号，就没有必要重复定一个
         if (esym->st_shndx != SHN_UNDEF) {
             esym_bind = ELFW(ST_BIND)(esym->st_info);
             /* propagate the most constraining visibility */
@@ -686,6 +690,7 @@ ST_FUNC int set_elf_sym(Section *s, addr_t value, unsigned long size,
                 tcc_error_noabort("'%s' defined twice", name);
             }
         } else {
+            // 如果全局符号表中的符号未定义，就使用
             esym->st_other = other;
             do_patch:
             esym->st_info = ELFW(ST_INFO)(sym_bind, sym_type);
@@ -2787,19 +2792,21 @@ ST_FUNC int tcc_load_object_file(TCCState *s1,
     stab_index = stabstr_index = 0;
 
     for (i = 1; i < ehdr.e_shnum; i++) {
+        // 符号表处理
         sh = &shdr[i];
         if (sh->sh_type == SHT_SYMTAB) {
-            if (symtab) {
+            if (symtab) { // symtab 在当前 obj elf 中重复定义
                 tcc_error_noabort("object must contain only one symtab");
                 fail:
                 ret = -1;
                 goto the_end;
             }
             nb_syms = sh->sh_size / sizeof(ElfW(Sym));
-            symtab = load_data(fd, file_offset + sh->sh_offset, sh->sh_size);
-            sm_table[i].s = symtab_section;
+            symtab = load_data(fd, file_offset + sh->sh_offset, sh->sh_size); // 取出符号表数据
+            sm_table[i].s = symtab_section; // sm_table 部分引用了 global 的 symtab
 
             /* now load strtab */
+            // 加载符号表的关联字符串表
             sh = &shdr[sh->sh_link];
             strtab = load_data(fd, file_offset + sh->sh_offset, sh->sh_size);
         }
@@ -2812,29 +2819,36 @@ ST_FUNC int tcc_load_object_file(TCCState *s1,
        ones in memory */
     for (i = 1; i < ehdr.e_shnum; i++) {
         /* no need to examine section name strtab */
-        if (i == ehdr.e_shstrndx)
+        if (i == ehdr.e_shstrndx) {
             continue;
+        }
+
         sh = &shdr[i];
-        if (sh->sh_type == SHT_RELX)
+        if (sh->sh_type == SHT_RELX) {
             sh = &shdr[sh->sh_info];
+        }
+        // 符号表由单独的类型(sh->sh_type SYMTAB), 所以下面的合并不针对符号表
         /* ignore sections types we do not handle (plus relocs to those) */
         if (sh->sh_type != SHT_PROGBITS &&
-            #ifdef TCC_ARM_EABI
-            sh->sh_type != SHT_ARM_EXIDX &&
-            #endif
-            #if TARGETOS_OpenBSD || TARGETOS_FreeBSD || TARGETOS_NetBSD
-            sh->sh_type != SHT_X86_64_UNWIND &&
-            #endif
             sh->sh_type != SHT_NOTE &&
             sh->sh_type != SHT_NOBITS &&
             sh->sh_type != SHT_PREINIT_ARRAY &&
             sh->sh_type != SHT_INIT_ARRAY &&
             sh->sh_type != SHT_FINI_ARRAY &&
             strcmp(strsec + sh->sh_name, ".stabstr")
-                )
+                ) {
+//#ifdef TCC_ARM_EABI
+//            sh->sh_type != SHT_ARM_EXIDX &&
+//#endif
+//#if TARGETOS_OpenBSD || TARGETOS_FreeBSD || TARGETOS_NetBSD
+//            sh->sh_type != SHT_X86_64_UNWIND &&
+//#endif
             continue;
-        if (seencompressed && 0 == strncmp(strsec + sh->sh_name, ".debug_", 7))
+        }
+
+        if (seencompressed && 0 == strncmp(strsec + sh->sh_name, ".debug_", 7)) {
             continue;
+        }
 
         sh = &shdr[i];
         sh_name = strsec + sh->sh_name;
@@ -2843,17 +2857,19 @@ ST_FUNC int tcc_load_object_file(TCCState *s1,
 
         /* find corresponding section, if any */
         for (j = 1; j < s1->nb_sections; j++) {
-            s = s1->sections[j];
-            if (!strcmp(s->name, sh_name)) {
+            s = s1->sections[j]; // s
+            if (!strcmp(s->name, sh_name)) { // 在 global section 中找到了同名 sh_name
+
                 if (!strncmp(sh_name, ".gnu.linkonce",
-                             sizeof(".gnu.linkonce") - 1)) {
+                             sizeof(".gnu.linkonce") - 1)) { // 内存中已经存在 linkonce 段了,这里的 linkonce 就不能合并到 section 中了
                     /* if a 'linkonce' section is already present, we
                        do not add it again. It is a little tricky as
                        symbols can still be defined in
                        it. */
-                    sm_table[i].link_once = 1;
-                    goto next;
+                    sm_table[i].link_once = 1; // 只能记录在 sm_table 中标记以下 link_once 了
+                    goto next; // link_once
                 }
+
                 // 记录调试表
                 if (stab_section) {
                     if (s == stab_section)
@@ -2865,7 +2881,7 @@ ST_FUNC int tcc_load_object_file(TCCState *s1,
             }
         }
         /* not found: create new section */
-        s = new_section(s1, sh_name, sh->sh_type, sh->sh_flags & ~SHF_GROUP);
+        s = new_section(s1, sh_name, sh->sh_type, sh->sh_flags & ~SHF_GROUP); // link_once 也会在这里被定义
         /* take as much info as possible from the section. sh_link and
            sh_info will be updated later */
         s->sh_addralign = sh->sh_addralign;
@@ -2874,7 +2890,7 @@ ST_FUNC int tcc_load_object_file(TCCState *s1,
         found:
         if (sh->sh_type != s->sh_type) {
 #if TARGETOS_OpenBSD || TARGETOS_FreeBSD || TARGETOS_NetBSD
-            if (strcmp (s->name, ".eh_frame"))
+            if (strcmp (s->name, ".eh_frame")) // 两个字符串不相等
 #endif
             {
                 tcc_error_noabort("invalid section type");
@@ -2944,23 +2960,27 @@ ST_FUNC int tcc_load_object_file(TCCState *s1,
         }
     }
 
-    /* resolve symbols */
+    /* resolve symbols */ // 之前没有进行全局符号的合并吗？ 也就是把 obj symtab section 合并到 global symtab?
     old_to_new_syms = tcc_mallocz(nb_syms * sizeof(int)); //
 
     sym = symtab + 1;
     for (i = 1; i < nb_syms; i++, sym++) {
-        if (sym->st_shndx != SHN_UNDEF &&
+        if (sym->st_shndx != SHN_UNDEF && // undef
             sym->st_shndx < SHN_LORESERVE) {
-            sm = &sm_table[sym->st_shndx];
+
+            sm = &sm_table[sym->st_shndx]; // st_shndx label 和 var_decl 都属于符号， label 通常在 text 段， var_decl 通常在 data 段，当然也可能在自定义段
             if (sm->link_once) {
                 /* if a symbol is in a link once section, we use the
                    already defined symbol. It is very important to get
                    correct relocations */
                 if (ELFW(ST_BIND)(sym->st_info) != STB_LOCAL) {
-                    name = strtab + sym->st_name;
+                    name = strtab + sym->st_name; // strtab 为 string
                     sym_index = find_elf_sym(symtab_section, name);
-                    if (sym_index)
+                    // 在已经 link 到的全局全局符号表中寻找改符号，如果真的找到了该符号就将其在符号表中的索引记录下来就行
+                    // 就记录一条 sym_index:
+                    if (sym_index) {
                         old_to_new_syms[i] = sym_index;
+                    }
                 }
                 continue;
             }
@@ -2970,10 +2990,10 @@ ST_FUNC int tcc_load_object_file(TCCState *s1,
             /* convert section number */
             sym->st_shndx = sm->s->sh_num;
             /* offset value */
-            sym->st_value += sm->offset;
+            sym->st_value += sm->offset; // sm->offset 是 section' data 合并到全局 section 时的起始地址，所以 st_value 自然要加上这个起始地址
         }
         /* add symbol */
-        name = strtab + sym->st_name;
+        name = strtab + sym->st_name; // 取出符号表的字符并将符号添加到全局符号表中。 s1->symtab_section
         sym_index = set_elf_sym(symtab_section, sym->st_value, sym->st_size,
                                 sym->st_info, sym->st_other,
                                 sym->st_shndx, name);

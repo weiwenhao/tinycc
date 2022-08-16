@@ -608,7 +608,7 @@ typedef struct Section {
     unsigned long data_allocated; /* used for realloc() handling */
     TCCState *s1;
     int sh_name;             /* elf section name (only used during output) */
-    int sh_num;              /* elf section number ?? 这是啥 */
+    int sh_num;              /* elf section number  */
     int sh_type;             /* elf section type */
     int sh_flags;            /* elf section flags */
     int sh_info;             /* elf section info */
