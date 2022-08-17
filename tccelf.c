@@ -627,7 +627,7 @@ ST_FUNC int set_elf_sym(Section *s, addr_t value, unsigned long size,
 
     sym_bind = ELFW(ST_BIND)(info);
     sym_type = ELFW(ST_TYPE)(info);
-    sym_vis = ELFW(ST_VISIBILITY)(other);
+    sym_vis = ELFW(ST_VISIBILITY)(other); // 待添加到符号表的符号的可见性
 
     if (sym_bind != STB_LOCAL) {
         // 全局搜索符号是否已经定义
@@ -643,31 +643,34 @@ ST_FUNC int set_elf_sym(Section *s, addr_t value, unsigned long size,
             && esym->st_other == other && esym->st_shndx == shndx)
             return sym_index; // 完全一样的符号，就没有必要重复定一个
         if (esym->st_shndx != SHN_UNDEF) {
+            // 已经定义了符号，且符号信息完全不一样
+
             esym_bind = ELFW(ST_BIND)(esym->st_info);
-            /* propagate the most constraining visibility */
+            /* propagate the most constraining visibility */ // 使用约束力最强的可见性等级
             /* STV_DEFAULT(0)<STV_PROTECTED(3)<STV_HIDDEN(2)<STV_INTERNAL(1) */
             esym_vis = ELFW(ST_VISIBILITY)(esym->st_other);
-            if (esym_vis == STV_DEFAULT) {
-                new_vis = sym_vis;
-            } else if (sym_vis == STV_DEFAULT) {
-                new_vis = esym_vis;
+            if (sym_vis == STV_DEFAULT) { // stv_default
+                new_vis = esym_vis; // 直接使用冲突符号的可见等级
             } else {
-                new_vis = (esym_vis < sym_vis) ? esym_vis : sym_vis;
+                new_vis = (esym_vis < sym_vis) ? esym_vis : sym_vis; // 谁的值比较小就用谁的,值越小约束力越强
             }
             esym->st_other = (esym->st_other & ~ELFW(ST_VISIBILITY)(-1))
-                             | new_vis;
-            if (shndx == SHN_UNDEF) {
+                             | new_vis; // 写入新的可见性
+
+            // 新符号的弱符号与可见性处理
+            if (shndx == SHN_UNDEF) { // shndx == 0
                 /* ignore adding of undefined symbol if the
                    corresponding symbol is already defined */
             } else if (sym_bind == STB_GLOBAL && esym_bind == STB_WEAK) {
                 /* global overrides weak, so patch */
+                // 强符号覆盖弱符号
                 goto do_patch;
             } else if (sym_bind == STB_WEAK && esym_bind == STB_GLOBAL) {
-                /* weak is ignored if already global */
+                /* weak is ignored if already global */ // 跳过
             } else if (sym_bind == STB_WEAK && esym_bind == STB_WEAK) {
-                /* keep first-found weak definition, ignore subsequents */
+                /* keep first-found weak definition, ignore subsequents */ // 保持不便
             } else if (sym_vis == STV_HIDDEN || sym_vis == STV_INTERNAL) {
-                /* ignore hidden symbols after */
+                /* ignore hidden symbols after */ //
             } else if ((esym->st_shndx == SHN_COMMON
                         || esym->st_shndx == bss_section->sh_num)
                        && (shndx < SHN_LORESERVE
@@ -675,8 +678,10 @@ ST_FUNC int set_elf_sym(Section *s, addr_t value, unsigned long size,
                 /* data symbol gets precedence over common/bss */
                 goto do_patch;
             } else if (shndx == SHN_COMMON || shndx == bss_section->sh_num) {
+                // 数据符号比公共/bss保持优先级
                 /* data symbol keeps precedence over common/bss */
             } else if (s->sh_flags & SHF_DYNSYM) {
+                // 我们承认两个定义了同一个符号
                 /* we accept that two DLL define the same symbol */
             } else if (esym->st_other & ST_ASM_SET) {
                 /* If the existing symbol came from an asm .set
@@ -690,7 +695,7 @@ ST_FUNC int set_elf_sym(Section *s, addr_t value, unsigned long size,
                 tcc_error_noabort("'%s' defined twice", name);
             }
         } else {
-            // 如果全局符号表中的符号未定义，就使用
+            // 如果全局符号表中的符号未定义，就使用当前符号的信息进行覆盖
             esym->st_other = other;
             do_patch:
             esym->st_info = ELFW(ST_INFO)(sym_bind, sym_type);
@@ -701,6 +706,7 @@ ST_FUNC int set_elf_sym(Section *s, addr_t value, unsigned long size,
         }
     } else {
         do_def:
+        // 全新的符号,添加到符号 hash 表中
         sym_index = put_elf_sym(s, value, size,
                                 ELFW(ST_INFO)(sym_bind, sym_type), other,
                                 shndx, name);
@@ -2824,12 +2830,12 @@ ST_FUNC int tcc_load_object_file(TCCState *s1,
         }
 
         sh = &shdr[i];
-        if (sh->sh_type == SHT_RELX) {
+        if (sh->sh_type == SHT_RELX) { // 重定位段进行了合并操作
             sh = &shdr[sh->sh_info];
         }
         // 符号表由单独的类型(sh->sh_type SYMTAB), 所以下面的合并不针对符号表
         /* ignore sections types we do not handle (plus relocs to those) */
-        if (sh->sh_type != SHT_PROGBITS &&
+        if (sh->sh_type != SHT_PROGBITS && // progbits data 段、text 段、程序段
             sh->sh_type != SHT_NOTE &&
             sh->sh_type != SHT_NOBITS &&
             sh->sh_type != SHT_PREINIT_ARRAY &&
@@ -2974,6 +2980,7 @@ ST_FUNC int tcc_load_object_file(TCCState *s1,
                    already defined symbol. It is very important to get
                    correct relocations */
                 if (ELFW(ST_BIND)(sym->st_info) != STB_LOCAL) {
+
                     name = strtab + sym->st_name; // strtab 为 string
                     sym_index = find_elf_sym(symtab_section, name);
                     // 在已经 link 到的全局全局符号表中寻找改符号，如果真的找到了该符号就将其在符号表中的索引记录下来就行
@@ -2994,6 +3001,7 @@ ST_FUNC int tcc_load_object_file(TCCState *s1,
         }
         /* add symbol */
         name = strtab + sym->st_name; // 取出符号表的字符并将符号添加到全局符号表中。 s1->symtab_section
+        // sym_index 表示在全局符号表中的索引，进行了弱符号处理
         sym_index = set_elf_sym(symtab_section, sym->st_value, sym->st_size,
                                 sym->st_info, sym->st_other,
                                 sym->st_shndx, name);
@@ -3001,29 +3009,38 @@ ST_FUNC int tcc_load_object_file(TCCState *s1,
     }
 
     /* third pass to patch relocation entries */
+    // 上面堆符号进行了 patch, 现在对 rela 相关符号的地址进行 patch
     for (i = 1; i < ehdr.e_shnum; i++) {
         s = sm_table[i].s;
-        if (!s)
+        if (!s) {
             continue;
+        }
+
         sh = &shdr[i];
         offset = sm_table[i].offset;
         size = sh->sh_size;
         switch (s->sh_type) {
+            // sht_rela?
             case SHT_RELX:
                 /* take relocation offset information */
-                offseti = sm_table[sh->sh_info].offset;
+                offseti = sm_table[sh->sh_info].offset; // rela_text_sh->sh_info => text_sh
+                // Elf64_Rela
+                //  offset of the new section in the existing section
+                // new rela.text section 在 global rela.text 中的其实位置
+                // offset / sizeof(*rel) 的含义是什么？
+                // s->data = s1->rela_section,data 是整个 rela 表的其实位置，也就是 0。由于其是一个数组指针，所以不能像字符串一样直接
+                // + strlen，其每一次+1 都相当于 data[index+1], (0 ~ offset) / item size 则是当前 rela 符号的其实位置
                 for (rel = (ElfW_Rel *) s->data + (offset / sizeof(*rel));
-                     rel < (ElfW_Rel *) s->data + ((offset + size) / sizeof(*rel));
-                     rel++) {
+                     rel < (ElfW_Rel *) s->data + ((offset + size) / sizeof(*rel)); rel++) {
                     int type;
                     unsigned sym_index;
                     /* convert symbol index */
                     type = ELFW(R_TYPE)(rel->r_info);
-                    sym_index = ELFW(R_SYM)(rel->r_info);
+                    sym_index = ELFW(R_SYM)(rel->r_info); // 重定位符号需要在符号表中添加一条 s_bind = SHN_UNDEF(UND) 类型的符号
                     /* NOTE: only one symtab assumed */
                     if (sym_index >= nb_syms)
                         goto invalid_reloc;
-                    sym_index = old_to_new_syms[sym_index];
+                    sym_index = old_to_new_syms[sym_index]; // 上面对 SHN_UNDEF 符号已经进行了合适的符号处理，这里可以直接重定位了
                     /* ignore link_once in rel section. */
                     if (!sym_index && !sm_table[sh->sh_info].link_once
 #ifdef TCC_TARGET_ARM
@@ -3038,9 +3055,9 @@ ST_FUNC int tcc_load_object_file(TCCState *s1,
                                           i, strsec + sh->sh_name, (int) rel->r_offset);
                         goto fail;
                     }
-                    rel->r_info = ELFW(R_INFO)(sym_index, type);
+                    rel->r_info = ELFW(R_INFO)(sym_index, type); // yes
                     /* offset the relocation offset */
-                    rel->r_offset += offseti;
+                    rel->r_offset += offseti; // 其所在的目标段也被调整了，所以这里进行一次 patch
 #ifdef TCC_TARGET_ARM
                     /* Jumps and branches from a Thumb code to a PLT entry need
                        special handling since PLT entries are ARM code.
