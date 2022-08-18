@@ -2488,6 +2488,7 @@ static void alloc_sec_names(TCCState *s1, int is_obj);
 
 /* Output an elf, coff or binary file */
 /* XXX: suppress unneeded sections */
+// // elf to file 核心
 static int elf_output_file(TCCState *s1, const char *filename) {
     int i, ret, file_type, file_offset, *sec_order;
     struct dyn_inf dyninf = {0};
@@ -2521,6 +2522,7 @@ static int elf_output_file(TCCState *s1, const char *filename) {
     resolve_common_syms(s1);
 
     if (!s1->static_link) {
+        // 动态链接
         if (file_type & TCC_OUTPUT_EXE) {
             char *ptr;
             /* allow override the dynamic loader */
@@ -2562,6 +2564,7 @@ static int elf_output_file(TCCState *s1, const char *filename) {
             export_global_syms(s1);
         }
     } else {
+        // 静态连接
         build_got_entries(s1, 0);
     }
     version_add(s1);
@@ -2609,6 +2612,7 @@ static int elf_output_file(TCCState *s1, const char *filename) {
     /* this array is used to reorder sections in the output file */
     sec_order = tcc_malloc(sizeof(int) * 2 * s1->nb_sections);
     /* compute section to program header mapping */
+    // section to program header
     file_offset = layout_sections(s1, sec_order, &dyninf);
 
     if (dynamic) {
