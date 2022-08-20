@@ -1205,10 +1205,7 @@ ST_FUNC void build_got_entries(TCCState *s1, int got_sym) {
                 } else if (sym->st_shndx == SHN_ABS) {
                     if (sym->st_value == 0) /* from tcc_add_btstub() */
                         continue;
-#ifndef TCC_TARGET_ARM
-                    if (PTR_SIZE != 8)
-                        continue;
-#endif
+
                     /* from tcc_add_symbol(): on 64 bit platforms these
                        need to go through .got */
                 } else
@@ -1227,6 +1224,7 @@ ST_FUNC void build_got_entries(TCCState *s1, int got_sym) {
                 continue;
             }
 #endif
+
             reloc_type = code_reloc(type);
             if (reloc_type == -1)
                 tcc_error("Unknown relocation type: %d", type);
