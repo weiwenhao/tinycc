@@ -1157,9 +1157,11 @@ ST_FUNC void build_got_entries(TCCState *s1, int got_sym) {
         if (s->sh_type != SHT_RELX)
             continue;
         /* no need to handle got relocations */
-        if (s->link != symtab_section)
+        if (s->link != symtab_section) // 这里 link 到了
             continue;
-        for_each_elem(s, 0, rel, ElfW_Rel) {
+        // 仅关注符号表重定位表
+//        for_each_elem(s, 0, rel, ElfW_Rel)
+        for (rel = (Elf64_Rela *) s->data + 0; rel < (Elf64_Rela *) (s->data + s->data_offset); rel++) {
             type = ELFW(R_TYPE)(rel->r_info);
             gotplt_entry = gotplt_entry_type(type);
             if (gotplt_entry == -1)
@@ -2527,7 +2529,7 @@ static int elf_output_file(TCCState *s1, const char *filename) {
     relocate_sections(s1);
 
     /* Perform relocation to GOT or PLT entries */
-    fill_got(s1);
+//    fill_got(s1);
 
     /* Create the ELF file with name 'filename' */
     ret = tcc_write_elf_file(s1, filename, dyninf.phnum, dyninf.phdr, file_offset, sec_order);

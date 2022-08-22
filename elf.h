@@ -307,7 +307,7 @@ typedef struct
   Elf64_Addr	sh_addr;		/* Section virtual addr at execution */
   Elf64_Off	sh_offset;		/* Section file offset */
   Elf64_Xword	sh_size;		/* Section size in bytes */
-  Elf64_Word	sh_link;		/* Link to another section */
+  Elf64_Word	sh_link;		/* Link to another section */ // 如果是重定位表，这里链接的就是重定位表写入的对应的符号表
   Elf64_Word	sh_info;		/* Additional section information */
   Elf64_Xword	sh_addralign;		/* Section alignment */
   Elf64_Xword	sh_entsize;		/* Entry size if section holds table */
