@@ -1229,6 +1229,7 @@ ST_FUNC void build_got_entries(TCCState *s1, int got_sym) {
                 continue;
             }
 #endif
+
             reloc_type = code_reloc(type);
             if (reloc_type == -1)
                 tcc_error("Unknown relocation type: %d", type);
