@@ -1161,15 +1161,18 @@ ST_FUNC void build_got_entries(TCCState *s1, int got_sym) {
             continue;
         // 仅关注符号表重定位表
 //        for_each_elem(s, 0, rel, ElfW_Rel)
+        // s 为 rel section
         for (rel = (Elf64_Rela *) s->data + 0; rel < (Elf64_Rela *) (s->data + s->data_offset); rel++) {
             type = ELFW(R_TYPE)(rel->r_info);
+            // 静态链接应该都是返回 AUTO_GOTPLT_ENTRY
             gotplt_entry = gotplt_entry_type(type);
             if (gotplt_entry == -1)
                 tcc_error("Unknown relocation type for got: %d", type);
+
             sym_index = ELFW(R_SYM)(rel->r_info);
             sym = &((ElfW(Sym) *) symtab_section->data)[sym_index];
 
-            if (gotplt_entry == NO_GOTPLT_ENTRY) {
+            if (gotplt_entry == NO_GOTPLT_ENTRY) { // 直接跳过了动态链接的符号
                 continue;
             }
 
@@ -1178,6 +1181,7 @@ ST_FUNC void build_got_entries(TCCState *s1, int got_sym) {
 	       probably created by tcc_add_symbol, and thus on 64-bit
 	       targets might be too far from application code.  */
             if (gotplt_entry == AUTO_GOTPLT_ENTRY) {
+                // elf 已经加载完毕，但是 rel 关联的符号未定义
                 if (sym->st_shndx == SHN_UNDEF) {
                     ElfW(Sym) *esym;
                     int dynindex;
@@ -1207,10 +1211,6 @@ ST_FUNC void build_got_entries(TCCState *s1, int got_sym) {
                 } else if (sym->st_shndx == SHN_ABS) {
                     if (sym->st_value == 0) /* from tcc_add_btstub() */
                         continue;
-#ifndef TCC_TARGET_ARM
-                    if (PTR_SIZE != 8)
-                        continue;
-#endif
                     /* from tcc_add_symbol(): on 64 bit platforms these
                        need to go through .got */
                 } else
@@ -2895,6 +2895,7 @@ ST_FUNC int tcc_load_object_file(TCCState *s1,
 
     /* third pass to patch relocation entries */
     // 上面堆符号进行了 patch, 现在对 rela 相关符号的地址进行 patch
+    // 当然并不是所有的符号都已经被 patch 了，不过没关系，先指向 undef 就行，一旦符号被加载进来就会自动修复的，而不是重新建
     for (i = 1; i < ehdr.e_shnum; i++) {
         s = sm_table[i].s;
         if (!s) {
@@ -2940,7 +2941,7 @@ ST_FUNC int tcc_load_object_file(TCCState *s1,
                                           i, strsec + sh->sh_name, (int) rel->r_offset);
                         goto fail;
                     }
-                    rel->r_info = ELFW(R_INFO)(sym_index, type); // yes
+                    rel->r_info = ELFW(R_INFO)(sym_index, type); // 使用新的 index 替换
                     /* offset the relocation offset */
                     rel->r_offset += offseti; // 其所在的目标段也被调整了，所以这里进行一次 patch
 #ifdef TCC_TARGET_ARM

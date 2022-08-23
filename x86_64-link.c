@@ -71,7 +71,7 @@ int gotplt_entry_type (int reloc_type)
         case R_X86_64_JUMP_SLOT:
         case R_X86_64_COPY:
         case R_X86_64_RELATIVE:
-            return NO_GOTPLT_ENTRY;
+            return NO_GOTPLT_ENTRY; // 动态链接看起来都是这个呀
 
 	/* The following relocs wouldn't normally need GOT or PLT
 	   slots, but we need them for simplicity in the link
