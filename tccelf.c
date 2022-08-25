@@ -1033,6 +1033,8 @@ static int prepare_dynamic_rel(TCCState *s1, Section *sr) {
 
 #ifdef NEED_BUILD_GOT
 
+// 即使是静态文件，也还是创建了 .got section
+// 并且符号表中增加了 _GLOBAL_OFFSET_TABLE_ , 其值保存了 0
 static int build_got(TCCState *s1) {
     /* if no got, then create it */
     s1->got = new_section(s1, ".got", SHT_PROGBITS, SHF_ALLOC | SHF_WRITE);
@@ -1059,6 +1061,7 @@ static struct sym_attr *put_got_entry(TCCState *s1, int dyn_reloc_type,
     Section *s_rel;
 
     need_plt_entry = (dyn_reloc_type == R_JMP_SLOT);
+    // 获取尽可能多的符号信息？
     attr = get_sym_attr(s1, sym_index, 1);
 
     /* In case a function is both called and its address taken 2 GOT entries
@@ -1067,9 +1070,14 @@ static struct sym_attr *put_got_entry(TCCState *s1, int dyn_reloc_type,
     if (need_plt_entry ? attr->plt_offset : attr->got_offset)
         return attr;
 
+    // s_rel 优先使用 got 段， 否则优先使用 .plt 段
+    // plt 段为类代码段 -> 存储的啥?
+    // got 段位类数据段 -> 存储的啥？
     s_rel = s1->got;
+    // 还是进来了一次！
     if (need_plt_entry) {
         if (!s1->plt) {
+            // plt 为类代码段，存了一些没啥用的数据
             s1->plt = new_section(s1, ".plt", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR);
             s1->plt->sh_entsize = 4;
         }
@@ -1077,7 +1085,7 @@ static struct sym_attr *put_got_entry(TCCState *s1, int dyn_reloc_type,
     }
 
     /* create the GOT entry */
-    got_offset = s1->got->data_offset;
+    got_offset = s1->got->data_offset; // 全局 offset....
     section_ptr_add(s1->got, PTR_SIZE);
 
     /* Create the GOT relocation that will insert the address of the object or
@@ -1092,36 +1100,8 @@ static struct sym_attr *put_got_entry(TCCState *s1, int dyn_reloc_type,
     name = (char *) symtab_section->link->data + sym->st_name;
     //printf("sym %d %s\n", need_plt_entry, name);
 
-    if (s1->dynsym) {
-        if (ELFW(ST_BIND)(sym->st_info) == STB_LOCAL) {
-            /* Hack alarm.  We don't want to emit dynamic symbols
-               and symbol based relocs for STB_LOCAL symbols, but rather
-               want to resolve them directly.  At this point the symbol
-               values aren't final yet, so we must defer this.  We will later
-               have to create a RELATIVE reloc anyway, so we misuse the
-               relocation slot to smuggle the symbol reference until
-               fill_local_got_entries.  Not that the sym_index is
-               relative to symtab_section, not s1->dynsym!  Nevertheless
-               we use s1->dyn_sym so that if this is the first call
-               that got->reloc is correctly created.  Also note that
-               RELATIVE relocs are not normally created for the .got,
-               so the types serves as a marker for later (and is retained
-               also for the final output, which is okay because then the
-               got is just normal data).  */
-            put_elf_reloc(s1->dynsym, s1->got, got_offset, R_RELATIVE,
-                          sym_index);
-        } else {
-            if (0 == attr->dyn_index)
-                attr->dyn_index = set_elf_sym(s1->dynsym, sym->st_value,
-                                              sym->st_size, sym->st_info, 0,
-                                              sym->st_shndx, name);
-            put_elf_reloc(s1->dynsym, s_rel, got_offset, dyn_reloc_type,
-                          attr->dyn_index);
-        }
-    } else {
-        put_elf_reloc(symtab_section, s1->got, got_offset, dyn_reloc_type,
-                      sym_index);
-    }
+    put_elf_reloc(symtab_section, s1->got, got_offset, dyn_reloc_type,
+                  sym_index);
 
     if (need_plt_entry) {
         attr->plt_offset = create_plt_entry(s1, got_offset, attr);
@@ -1218,18 +1198,20 @@ ST_FUNC void build_got_entries(TCCState *s1, int got_sym) {
             }
 
 #ifdef TCC_TARGET_X86_64
-            if ((type == R_X86_64_PLT32 || type == R_X86_64_PC32) &&
-                sym->st_shndx != SHN_UNDEF &&
-                (ELFW(ST_VISIBILITY)(sym->st_other) != STV_DEFAULT ||
-                 ELFW(ST_BIND)(sym->st_info) == STB_LOCAL ||
-                 s1->output_type & TCC_OUTPUT_EXE)) {
-                if (pass != 0)
+            if ((type == R_X86_64_PLT32 || type == R_X86_64_PC32) && sym->st_shndx != SHN_UNDEF &&
+                (ELFW(ST_VISIBILITY)(sym->st_other) != STV_DEFAULT || ELFW(ST_BIND)(sym->st_info) == STB_LOCAL ||
+                 s1->output_type & TCC_OUTPUT_EXE)) { // sym  确定才能这么搞，好像就搞完了
+
+                if (pass != 0) { // 这个东西没必要第二遍了
                     continue;
-                rel->r_info = ELFW(R_INFO)(sym_index, R_X86_64_PC32);
+                }
+
+                rel->r_info = ELFW(R_INFO)(sym_index, R_X86_64_PC32); // R_X86_64_PLT32 == R_X86_64_PC32
                 continue;
             }
 #endif
 
+            // 静态链接竟然出现了 sym->st_shndx(符号所在的 section 的索引) 未定义的情况,那不得不进行一些动态处理了！
             reloc_type = code_reloc(type);
             if (reloc_type == -1)
                 tcc_error("Unknown relocation type: %d", type);
@@ -1240,24 +1222,28 @@ ST_FUNC void build_got_entries(TCCState *s1, int got_sym) {
                     continue;
                 reloc_type = R_JMP_SLOT;
             } else {
-                if (pass != 1)
+                if (pass != 1) // 第二轮才配置为 R_GLOB_DAT
                     continue;
                 reloc_type = R_GLOB_DAT;
             }
 
-            if (!s1->got)
+            if (!s1->got) {
                 got_sym = build_got(s1);
+            }
 
             if (gotplt_entry == BUILD_GOT_ONLY)
                 continue;
 
+            // got 是一个和数据段一样的结构(不定长结构),其保存了目标调用地址
+            // 此处则是保存了重定位表引用的目标符号的索引以及重定位的类型？
             attr = put_got_entry(s1, reloc_type, sym_index);
 
             if (reloc_type == R_JMP_SLOT)
                 rel->r_info = ELFW(R_INFO)(attr->plt_sym, type);
         }
     }
-    if (++pass < 2)
+
+    if (++pass < 2) // 这里对 pass 进行了自增，然后重复重定位？两次 0, 1
         goto redo;
     /* .rel.plt refers to .got actually */
     if (s1->plt && s1->plt->reloc)
@@ -2530,7 +2516,7 @@ static int elf_output_file(TCCState *s1, const char *filename) {
     relocate_sections(s1);
 
     /* Perform relocation to GOT or PLT entries */
-//    fill_got(s1);
+    fill_got(s1);
 
     /* Create the ELF file with name 'filename' */
     ret = tcc_write_elf_file(s1, filename, dyninf.phnum, dyninf.phdr, file_offset, sec_order);
