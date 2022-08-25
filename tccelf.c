@@ -715,8 +715,7 @@ ST_FUNC int set_elf_sym(Section *s, addr_t value, unsigned long size,
 }
 
 /* put relocation */
-ST_FUNC void put_elf_reloca(Section *symtab, Section *s, unsigned long offset,
-                            int type, int symbol, addr_t addend) {
+ST_FUNC void put_elf_reloca(Section *symtab, Section *s, unsigned long offset, int type, int symbol, addr_t addend) {
     TCCState *s1 = s->s1;
     char buf[256];
     Section *sr;
@@ -728,15 +727,17 @@ ST_FUNC void put_elf_reloca(Section *symtab, Section *s, unsigned long offset,
         snprintf(buf, sizeof(buf), REL_SECTION_FMT, s->name);
         /* if the symtab is allocated, then we consider the relocation
            are also */
+        // 为某个段增加重定位信息
         sr = new_section(s->s1, buf, SHT_RELX, symtab->sh_flags);
         sr->sh_entsize = sizeof(ElfW_Rel);
-        sr->link = symtab;
-        sr->sh_info = s->sh_num;
+        sr->link = symtab; // 指向对应的符号表？
+        sr->sh_info = s->sh_num; // 指向重定位的目标段？
         s->reloc = sr;
     }
+    // 往 Elf64_Rela 中定位表中增加一项(动态链接项目)
     rel = section_ptr_add(sr, sizeof(ElfW_Rel));
-    rel->r_offset = offset;
-    rel->r_info = ELFW(R_INFO)(symbol, type);
+    rel->r_offset = offset; // 需要重定位的位置(对于可重定位文件，这就是段偏移)
+    rel->r_info = ELFW(R_INFO)(symbol, type); // symbol 符号在符号表中的索引，type  重定位的类型
 #if SHT_RELX == SHT_RELA
     rel->r_addend = addend;
 #endif
@@ -753,6 +754,7 @@ ST_FUNC struct sym_attr *get_sym_attr(TCCState *s1, int index, int alloc) {
     int n;
     struct sym_attr *tab;
 
+    // 空间分配
     if (index >= s1->nb_sym_attrs) {
         if (!alloc)
             return s1->sym_attrs;
@@ -763,9 +765,11 @@ ST_FUNC struct sym_attr *get_sym_attr(TCCState *s1, int index, int alloc) {
         tab = tcc_realloc(s1->sym_attrs, n * sizeof(*s1->sym_attrs));
         s1->sym_attrs = tab;
         memset(s1->sym_attrs + s1->nb_sym_attrs, 0,
-               (n - s1->nb_sym_attrs) * sizeof(*s1->sym_attrs));
+               (n - s1->nb_sym_attrs) * sizeof(*s1->sym_attrs)); // 预留足够的 sym_attrs 空间，并没什么有用的操作
         s1->nb_sym_attrs = n;
     }
+
+    // 返回符号的额外属性值,主要是 got 和 plt 信息
     return &s1->sym_attrs[index];
 }
 
@@ -1037,10 +1041,12 @@ static int prepare_dynamic_rel(TCCState *s1, Section *sr) {
 // 并且符号表中增加了 _GLOBAL_OFFSET_TABLE_ , 其值保存了 0
 static int build_got(TCCState *s1) {
     /* if no got, then create it */
+    // new_section 已经将 got 段添加到了 s1->sections 中
     s1->got = new_section(s1, ".got", SHT_PROGBITS, SHF_ALLOC | SHF_WRITE);
     s1->got->sh_entsize = 4;
     /* keep space for _DYNAMIC pointer and two dummy got entries */
     section_ptr_add(s1->got, 3 * PTR_SIZE);
+    // got 段在内存中的位置存储在符号的 _GLOBAL_OFFSET_TABLE_ 的 value 中
     return set_elf_sym(symtab_section, 0, 0, ELFW(ST_INFO)(STB_GLOBAL, STT_OBJECT),
                        0, s1->got->sh_num, "_GLOBAL_OFFSET_TABLE_");
 }
@@ -1060,15 +1066,19 @@ static struct sym_attr *put_got_entry(TCCState *s1, int dyn_reloc_type,
     int len;
     Section *s_rel;
 
+    // 代码段重定位
     need_plt_entry = (dyn_reloc_type == R_JMP_SLOT);
-    // 获取尽可能多的符号信息？
+
+    // 未定义的符号的信息？
     attr = get_sym_attr(s1, sym_index, 1);
 
     /* In case a function is both called and its address taken 2 GOT entries
        are created, one for taking the address (GOT) and the other for the PLT
        entry (PLTGOT).  */
-    if (need_plt_entry ? attr->plt_offset : attr->got_offset)
+    if (need_plt_entry ? attr->plt_offset : attr->got_offset) {
+        // 如果符号已经重复添加过 got/plt 就直接返回符号的信息就行了
         return attr;
+    }
 
     // s_rel 优先使用 got 段， 否则优先使用 .plt 段
     // plt 段为类代码段 -> 存储的啥?
@@ -1077,7 +1087,7 @@ static struct sym_attr *put_got_entry(TCCState *s1, int dyn_reloc_type,
     // 还是进来了一次！
     if (need_plt_entry) {
         if (!s1->plt) {
-            // plt 为类代码段，存了一些没啥用的数据
+            // 初次创建 plt 段
             s1->plt = new_section(s1, ".plt", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR);
             s1->plt->sh_entsize = 4;
         }
@@ -1086,6 +1096,7 @@ static struct sym_attr *put_got_entry(TCCState *s1, int dyn_reloc_type,
 
     /* create the GOT entry */
     got_offset = s1->got->data_offset; // 全局 offset....
+    // got 表 预留一个指针的位置
     section_ptr_add(s1->got, PTR_SIZE);
 
     /* Create the GOT relocation that will insert the address of the object or
@@ -1095,11 +1106,11 @@ static struct sym_attr *put_got_entry(TCCState *s1, int dyn_reloc_type,
        done lazily for GOT entry with *_JUMP_SLOT relocation type (the one
        associated to a PLT entry) but is currently done at load time for an
        unknown reason. */
-
     sym = &((ElfW(Sym) *) symtab_section->data)[sym_index];
     name = (char *) symtab_section->link->data + sym->st_name;
     //printf("sym %d %s\n", need_plt_entry, name);
 
+    // 使用临时的 .rela.got 保存 got 表(类似 data 段)的符号重定位信息,随后就会将其填充完毕
     put_elf_reloc(symtab_section, s1->got, got_offset, dyn_reloc_type,
                   sym_index);
 
@@ -1111,7 +1122,8 @@ static struct sym_attr *put_got_entry(TCCState *s1, int dyn_reloc_type,
         if (len > sizeof plt_name - 5)
             len = sizeof plt_name - 5;
         memcpy(plt_name, name, len);
-        strcpy(plt_name + len, "@plt");
+        strcpy(plt_name + len, "@plt"); // _DYNAMIC@plt
+        // 添加 _DYNAMIC@plt 到符号表中，其数据类型为 STT_FUNC, 也就是一个 label, call _DYNAMIC@plt 会跳转到对应的代码段！
         attr->plt_sym = put_elf_sym(s1->symtab, attr->plt_offset, 0,
                                     ELFW(ST_INFO)(STB_GLOBAL, STT_FUNC), 0, s1->plt->sh_num, plt_name);
     } else {
@@ -1165,36 +1177,13 @@ ST_FUNC void build_got_entries(TCCState *s1, int got_sym) {
                 if (sym->st_shndx == SHN_UNDEF) {
                     ElfW(Sym) *esym;
                     int dynindex;
-                    if (!PCRELATIVE_DLLPLT
-                        && (s1->output_type & TCC_OUTPUT_DYN))
-                        continue;
-                    /* Relocations for UNDEF symbols would normally need
-                       to be transferred into the executable or shared object.
-                       If that were done AUTO_GOTPLT_ENTRY wouldn't exist.
-                       But TCC doesn't do that (at least for exes), so we
-                       need to resolve all such relocs locally.  And that
-                       means PLT slots for functions in DLLs and COPY relocs for
-                       data symbols.  COPY relocs were generated in
-                       bind_exe_dynsyms (and the symbol adjusted to be defined),
-                       and for functions we were generated a dynamic symbol
-                       of function type.  */
-                    if (s1->dynsym) {
-                        /* dynsym isn't set for -run :-/  */
-                        dynindex = get_sym_attr(s1, sym_index, 0)->dyn_index;
-                        esym = (ElfW(Sym) *) s1->dynsym->data + dynindex;
-                        if (dynindex
-                            && (ELFW(ST_TYPE)(esym->st_info) == STT_FUNC
-                                || (ELFW(ST_TYPE)(esym->st_info) == STT_NOTYPE
-                                    && ELFW(ST_TYPE)(sym->st_info) == STT_FUNC)))
-                            goto jmp_slot;
-                    }
                 } else if (sym->st_shndx == SHN_ABS) {
-                    if (sym->st_value == 0) /* from tcc_add_btstub() */
+                    if (sym->st_value == 0) {
                         continue;
-                    /* from tcc_add_symbol(): on 64 bit platforms these
-                       need to go through .got */
-                } else
+                    }
+                } else {
                     continue;
+                }
             }
 
 #ifdef TCC_TARGET_X86_64
@@ -1212,44 +1201,57 @@ ST_FUNC void build_got_entries(TCCState *s1, int got_sym) {
 #endif
 
             // 静态链接竟然出现了 sym->st_shndx(符号所在的 section 的索引) 未定义的情况,那不得不进行一些动态处理了！
-            reloc_type = code_reloc(type);
-            if (reloc_type == -1)
+            // 判断是代码段重定位还是数据段重定位
+            reloc_type = code_reloc(type); // undef rel R_X86_64_PC32
+            if (reloc_type == -1) {
                 tcc_error("Unknown relocation type: %d", type);
-
-            if (reloc_type != 0) {
-                jmp_slot:
-                if (pass != 0)
-                    continue;
-                reloc_type = R_JMP_SLOT;
-            } else {
-                if (pass != 1) // 第二轮才配置为 R_GLOB_DAT
-                    continue;
-                reloc_type = R_GLOB_DAT;
             }
 
+            if (reloc_type == 1) {
+                // 代码段重定位
+                if (pass == 1) {
+                    continue;
+                }
+                // 第一轮进行代码段重定位
+                reloc_type = R_JMP_SLOT; // # R_X86_64_JUMP_SLOT #define R_X86_64_JUMP_SLOT	7	/* Create PLT entry */
+            } else {
+                if (pass == 0) {
+                    continue;
+                }
+                // 第二轮进行数据段重定位
+                reloc_type = R_GLOB_DAT; // #define R_X86_64_GLOB_DAT	6	/* Create GOT entry */
+            }
+
+            // 第一轮只进行了仅进行了一次代码段的重定位，也就是 R_JMP_SLOT 用来创建 plt entry
+            // 后续就开始了数据段的重定位
+
+            // 首次初始化 got 段
             if (!s1->got) {
                 got_sym = build_got(s1);
             }
-
-            if (gotplt_entry == BUILD_GOT_ONLY)
-                continue;
 
             // got 是一个和数据段一样的结构(不定长结构),其保存了目标调用地址
             // 此处则是保存了重定位表引用的目标符号的索引以及重定位的类型？
             attr = put_got_entry(s1, reloc_type, sym_index);
 
-            if (reloc_type == R_JMP_SLOT)
+            if (reloc_type == R_JMP_SLOT) {
+                // rel->r_info中的 info 部分保存了重定位符号在符号表中的索引，这里直接使用 xxx@plt 替换响应的 xxx
+                // 示例 jmp xxx => jmp xxx@plt
                 rel->r_info = ELFW(R_INFO)(attr->plt_sym, type);
+            }
         }
     }
 
-    if (++pass < 2) // 这里对 pass 进行了自增，然后重复重定位？两次 0, 1
+    if (++pass < 2) {
         goto redo;
+    } // 这里对 pass 进行了自增，然后重复重定位？两次 0, 1
     /* .rel.plt refers to .got actually */
-    if (s1->plt && s1->plt->reloc)
+    if (s1->plt && s1->plt->reloc) {
         s1->plt->reloc->sh_info = s1->got->sh_num;
-    if (got_sym) /* set size */
+    }
+    if (got_sym) /* set size */ {
         ((ElfW(Sym) *) symtab_section->data)[got_sym].st_size = s1->got->data_offset;
+    }
 }
 
 #endif /* def NEED_BUILD_GOT */
