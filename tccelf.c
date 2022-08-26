@@ -844,44 +844,24 @@ ST_FUNC void relocate_syms(TCCState *s1, Section *symtab, int do_resolve) {
     for_each_elem(symtab, 1, sym, ElfW(Sym)) {
         sh_num = sym->st_shndx;
         if (sh_num == SHN_UNDEF) {
+            // 0x5555557e5b06 "_DYNAMIC" 唯一未定义的符号就是这个，还是个 STB_WEAK 类型的符号
             name = (char *) s1->symtab->link->data + sym->st_name;
-            /* Use ld.so to resolve symbol for us (for tcc -run) */
-            if (do_resolve) {
-#if defined TCC_IS_NATIVE && !defined TCC_TARGET_PE
-                /* dlsym() needs the undecorated name.  */
-                void *addr = dlsym(RTLD_DEFAULT, &name[s1->leading_underscore]);
-#if TARGETOS_OpenBSD || TARGETOS_FreeBSD || TARGETOS_NetBSD || TARGETOS_ANDROID
-                if (addr == NULL) {
-                    int i;
-                    for (i = 0; i < s1->nb_loaded_dlls; i++)
-                                if ((addr = dlsym(s1->loaded_dlls[i]->handle, name)))
-                        break;
-                }
-#endif
-                if (addr) {
-                    sym->st_value = (addr_t) addr;
-#ifdef DEBUG_RELOC
-                    printf ("relocate_sym: %s -> 0x%lx\n", name, sym->st_value);
-#endif
-                    goto found;
-                }
-#endif
-                /* if dynamic symbol exist, it will be used in relocate_section */
-            } else if (s1->dynsym && find_elf_sym(s1->dynsym, name))
-                goto found;
             /* XXX: _fp_hw seems to be part of the ABI, so we ignore
                it */
             if (!strcmp(name, "_fp_hw"))
                 goto found;
             /* only weak symbols are accepted to be undefined. Their
                value is zero */
+            // 静态链接中只有弱符号允许未定义，他们的值固定位 0
             sym_bind = ELFW(ST_BIND)(sym->st_info);
-            if (sym_bind == STB_WEAK)
+            if (sym_bind == STB_WEAK) //
                 sym->st_value = 0;
             else
                 tcc_error_noabort("undefined symbol '%s'", name);
 
         } else if (sh_num < SHN_LORESERVE) {
+            // 对于可重定位文件， st_value 保存了基于 section 的偏移
+            // 对于可执行文件， st_value 则需要保存实际的线性地址了，也就是 section 的绝对地址 + st_value
             /* add section base */
             sym->st_value += s1->sections[sym->st_shndx]->sh_addr;
         }
@@ -900,14 +880,17 @@ static void relocate_section(TCCState *s1, Section *s, Section *sr) {
     int is_dwarf = s->sh_num >= s1->dwlo && s->sh_num < s1->dwhi;
 
     qrel = (ElfW_Rel *) sr->data;
-    for_each_elem(sr, 0, rel, ElfW_Rel) {
+    for_each_elem(sr, 0, rel, ElfW_Rel) { // 遍历重定位表项，进行？？
+        // s 为目标端, s->data 为段起始指针，其实就是 0, rel->r_offset 是基于目标段的偏移
+        // 但是总的来说 ptr 都是待修正的符号的位置
         ptr = s->data + rel->r_offset;
+        // rel 引用的符号在符号表的索引，在没有修正之前就是 UNDEF, 不过 load elf 的时候已经进行了不停的修正，所以这里已经不会是 undef 了
         sym_index = ELFW(R_SYM)(rel->r_info);
-        sym = &((ElfW(Sym) *) symtab_section->data)[sym_index];
-        type = ELFW(R_TYPE)(rel->r_info);
+        sym = &((ElfW(Sym) *) symtab_section->data)[sym_index]; // 符号
+        type = ELFW(R_TYPE)(rel->r_info); // type 就是重定位的类型
         tgt = sym->st_value;
 #if SHT_RELX == SHT_RELA
-        tgt += rel->r_addend;
+        tgt += rel->r_addend; // 为啥定义符号的位置要加上 rel->addend? 定位到结束位置？
 #endif
         if (is_dwarf && type == R_DATA_32DW
             && sym->st_shndx >= s1->dwlo && sym->st_shndx < s1->dwhi) {
@@ -918,23 +901,23 @@ static void relocate_section(TCCState *s1, Section *s, Section *sr) {
         addr = s->sh_addr + rel->r_offset;
         relocate(s1, rel, type, ptr, addr, tgt);
     }
-#ifndef ELF_OBJ_ONLY
-    /* if the relocation is allocated, we change its symbol table */
-    if (sr->sh_flags & SHF_ALLOC) {
-        sr->link = s1->dynsym;
-        if (s1->output_type & TCC_OUTPUT_DYN) {
-            size_t r = (uint8_t *) qrel - sr->data;
-            if (sizeof((Stab_Sym *) 0)->n_value < PTR_SIZE
-                                        && 0 == strcmp(s->name, ".stab"))
-            r = 0; /* cannot apply 64bit relocation to 32bit value */
-            sr->data_offset = sr->sh_size = r;
-#ifdef CONFIG_TCC_PIE
-            if (r && 0 == (s->sh_flags & SHF_WRITE))
-                tcc_warning("%d relocations to ro-section %s", (unsigned)(r / sizeof *qrel), s->name);
-#endif
-        }
-    }
-#endif
+//#ifndef ELF_OBJ_ONLY
+//    /* if the relocation is allocated, we change its symbol table */
+//    if (sr->sh_flags & SHF_ALLOC) {
+//        sr->link = s1->dynsym;
+//        if (s1->output_type & TCC_OUTPUT_DYN) {
+//            size_t r = (uint8_t *) qrel - sr->data;
+//            if (sizeof((Stab_Sym *) 0)->n_value < PTR_SIZE
+//                                        && 0 == strcmp(s->name, ".stab"))
+//            r = 0; /* cannot apply 64bit relocation to 32bit value */
+//            sr->data_offset = sr->sh_size = r;
+//#ifdef CONFIG_TCC_PIE
+//            if (r && 0 == (s->sh_flags & SHF_WRITE))
+//                tcc_warning("%d relocations to ro-section %s", (unsigned)(r / sizeof *qrel), s->name);
+//#endif
+//        }
+//    }
+//#endif
 }
 
 /* relocate all sections */
@@ -946,20 +929,18 @@ ST_FUNC void relocate_sections(TCCState *s1) {
         sr = s1->sections[i];
         if (sr->sh_type != SHT_RELX)
             continue;
+
+        // 只解析重定位节需要重定位的 section， sr->sh_info 保存了重定位的目标 section
         s = s1->sections[sr->sh_info];
-#ifndef TCC_TARGET_MACHO
-        if (s != s1->got
-            || s1->static_link
-            || s1->output_type == TCC_OUTPUT_MEMORY)
-#endif
-        {
-            relocate_section(s1, s, sr);
-        }
+        relocate_section(s1, s, sr);
+
 #ifndef ELF_OBJ_ONLY
         if (sr->sh_flags & SHF_ALLOC) {
             ElfW_Rel *rel;
             /* relocate relocation table in 'sr' */
-            for_each_elem(sr, 0, rel, ElfW_Rel)rel->r_offset += s->sh_addr;
+            for_each_elem(sr, 0, rel, ElfW_Rel) {
+                rel->r_offset += s->sh_addr;
+            }
         }
 #endif
     }
@@ -1110,10 +1091,11 @@ static struct sym_attr *put_got_entry(TCCState *s1, int dyn_reloc_type,
     name = (char *) symtab_section->link->data + sym->st_name;
     //printf("sym %d %s\n", need_plt_entry, name);
 
-    // 使用临时的 .rela.got 保存 got 表(类似 data 段)的符号重定位信息,随后就会将其填充完毕
+    // 使用临时的 .rela.got 保存 got 表(类似 data 段)的符号重定位信息,随后(咱也不知道啥时候，总之可执行文件中是没有 rela 段了)就会将其填充完毕
     put_elf_reloc(symtab_section, s1->got, got_offset, dyn_reloc_type,
                   sym_index);
 
+    // jmp 00000 （符号表和重定位表记录这个信息就行了）
     if (need_plt_entry) {
         attr->plt_offset = create_plt_entry(s1, got_offset, attr);
 
@@ -1235,6 +1217,7 @@ ST_FUNC void build_got_entries(TCCState *s1, int got_sym) {
             attr = put_got_entry(s1, reloc_type, sym_index);
 
             if (reloc_type == R_JMP_SLOT) {
+                // 对于代码段的重定位
                 // rel->r_info中的 info 部分保存了重定位符号在符号表中的索引，这里直接使用 xxx@plt 替换响应的 xxx
                 // 示例 jmp xxx => jmp xxx@plt
                 rel->r_info = ELFW(R_INFO)(attr->plt_sym, type);
@@ -2495,9 +2478,10 @@ static int elf_output_file(TCCState *s1, const char *filename) {
 
     /* if linking, also link in runtime libraries (libc, libgcc, etc.) */
     tcc_add_runtime(s1);
+
     resolve_common_syms(s1);
 
-    // 静态连接
+    // 构造了 got 段和 plt 段
     build_got_entries(s1, 0);
     version_add(s1);
 
@@ -2506,15 +2490,19 @@ static int elf_output_file(TCCState *s1, const char *filename) {
 
     /* this array is used to reorder sections in the output file */
     sec_order = tcc_malloc(sizeof(int) * 2 * s1->nb_sections);
+
     /* compute section to program header mapping */
     // section to program header
     file_offset = layout_sections(s1, sec_order, &dyninf);
 
     /* if building executable or DLL, then relocate each section
        except the GOT which is already relocated */
-    relocate_syms(s1, s1->symtab, 0);
-    if (s1->nb_errors != 0)
+    // 将 sym->st_value 转换成真实地址
+    relocate_syms(s1, s1->symtab, 0); // 静态编译,不需要解析未定义的符号
+    if (s1->nb_errors != 0) {
         goto the_end;
+    }
+
     relocate_sections(s1);
 
     /* Perform relocation to GOT or PLT entries */
