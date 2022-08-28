@@ -191,49 +191,15 @@ void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t 
 
     switch (type) {
         case R_X86_64_64:
-            if (s1->output_type & TCC_OUTPUT_DYN) {
-                esym_index = get_sym_attr(s1, sym_index, 0)->dyn_index;
-                qrel->r_offset = rel->r_offset;
-                if (esym_index) {
-                    qrel->r_info = ELFW(R_INFO)(esym_index, R_X86_64_64);
-                    qrel->r_addend = rel->r_addend;
-                    qrel++;
-                    break;
-                } else {
-                    qrel->r_info = ELFW(R_INFO)(0, R_X86_64_RELATIVE);
-                    qrel->r_addend = read64le(ptr) + val;
-                    qrel++;
-                }
-            }
+            // 应该是绝对地址定位，所以直接写入符号的绝对位置即可
             add64le(ptr, val);
             break;
         case R_X86_64_32:
         case R_X86_64_32S:
-            if (s1->output_type & TCC_OUTPUT_DYN) {
-                /* XXX: this logic may depend on TCC's codegen
-                   now TCC uses R_X86_64_32 even for a 64bit pointer */
-                qrel->r_offset = rel->r_offset;
-                qrel->r_info = ELFW(R_INFO)(0, R_X86_64_RELATIVE);
-                /* Use sign extension! */
-                qrel->r_addend = (int) read32le(ptr) + val;
-                qrel++;
-            }
             add32le(ptr, val);
             break;
 
         case R_X86_64_PC32:
-            if (s1->output_type == TCC_OUTPUT_DLL) {
-                /* DLL relocation */
-                esym_index = get_sym_attr(s1, sym_index, 0)->dyn_index;
-                if (esym_index) {
-                    qrel->r_offset = rel->r_offset;
-                    qrel->r_info = ELFW(R_INFO)(esym_index, R_X86_64_PC32);
-                    /* Use sign extension! */
-                    qrel->r_addend = (int) read32le(ptr) + rel->r_addend;
-                    qrel++;
-                    break;
-                }
-            }
             goto plt32pc32;
 
         case R_X86_64_PLT32:
@@ -241,11 +207,16 @@ void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t 
 
         plt32pc32:
         {
+            // 相对地址计算，
+            // addr 保存了符号的使用位置（加载到虚拟内存中的位置）
+            // val 保存了符号的定义的位置（加载到虚拟内存中的位置）
+            // ptr 真正的段数据,存储在编译时内存中，相对地址修正的填充点
             long long diff;
             diff = (long long) val - addr;
             if (diff < -2147483648LL || diff > 2147483647LL) {
                 tcc_error("internal error: relocation failed");
             }
+            // 小端写入
             add32le(ptr, diff);
         }
             break;
@@ -258,23 +229,12 @@ void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t 
             break;
 
         case R_X86_64_PC64:
-            if (s1->output_type == TCC_OUTPUT_DLL) {
-                /* DLL relocation */
-                esym_index = get_sym_attr(s1, sym_index, 0)->dyn_index;
-                if (esym_index) {
-                    qrel->r_offset = rel->r_offset;
-                    qrel->r_info = ELFW(R_INFO)(esym_index, R_X86_64_PC64);
-                    qrel->r_addend = read64le(ptr) + rel->r_addend;
-                    qrel++;
-                    break;
-                }
-            }
             add64le(ptr, val - addr);
             break;
 
         case R_X86_64_GLOB_DAT:
         case R_X86_64_JUMP_SLOT:
-            /* They don't need addend */
+            /* They don't need addend */ // 还有不少这种方式的重定位，got 表的重定位应该都来了？
             write64le(ptr, val - rel->r_addend);
             break;
         case R_X86_64_GOTPCREL:
@@ -375,9 +335,6 @@ void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t 
         case R_X86_64_NONE:
             break;
         case R_X86_64_RELATIVE:
-#ifdef TCC_TARGET_PE
-            add32le(ptr, val - s1->pe_imagebase);
-#endif
             /* do nothing */
             break;
         default:

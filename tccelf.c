@@ -260,7 +260,7 @@ ST_FUNC Section *new_symtab(TCCState *s1,
 
     ptr = section_ptr_add(hash, (2 + nb_buckets + 1) * sizeof(int));
     ptr[0] = nb_buckets;
-    ptr[1] = 1;
+    ptr[1] = 1; // hash section 预留了两个位置？
     memset(ptr + 2, 0, (nb_buckets + 1) * sizeof(int));
     return symtab;
 }
@@ -427,15 +427,15 @@ ST_FUNC int put_elf_sym(Section *s, addr_t value, unsigned long size,
         /* only add global or weak symbols. */
         if (ELFW(ST_BIND)(info) != STB_LOCAL) {
             /* add another hashing entry */
-            nbuckets = base[0];
+            nbuckets = base[0]; // hash 表的元素的数量
             h = elf_hash((unsigned char *) s->link->data + name_offset) % nbuckets;
             *ptr = base[2 + h];
-            base[2 + h] = sym_index;
-            base[1]++;
+            base[2 + h] = sym_index; // hash 表中存储了符号表的索引
+            base[1]++; // 绑定了 int 类型
             /* we resize the hash table */
             hs->nb_hashed_syms++;
             if (hs->nb_hashed_syms > 2 * nbuckets) {
-                rebuild_hash(s, 2 * nbuckets);
+                rebuild_hash(s, 2 * nbuckets); // rehash
             }
         } else {
             *ptr = 0;
@@ -888,16 +888,12 @@ static void relocate_section(TCCState *s1, Section *s, Section *sr) {
         sym_index = ELFW(R_SYM)(rel->r_info);
         sym = &((ElfW(Sym) *) symtab_section->data)[sym_index]; // 符号
         type = ELFW(R_TYPE)(rel->r_info); // type 就是重定位的类型
-        tgt = sym->st_value;
+        tgt = sym->st_value; // 符号定义的位置
 #if SHT_RELX == SHT_RELA
         tgt += rel->r_addend; // 为啥定义符号的位置要加上 rel->addend? 定位到结束位置？
 #endif
-        if (is_dwarf && type == R_DATA_32DW
-            && sym->st_shndx >= s1->dwlo && sym->st_shndx < s1->dwhi) {
-            /* dwarf section relocation to each other */
-            add32le(ptr, tgt - s1->sections[sym->st_shndx]->sh_addr);
-            continue;
-        }
+        // s->sh_addr 应该就是目标段的地址，加上 r_offset 就是绝对的地址修正了？
+        // 没看出来 ptr 和 adr 的区别
         addr = s->sh_addr + rel->r_offset;
         relocate(s1, rel, type, ptr, addr, tgt);
     }
@@ -933,16 +929,6 @@ ST_FUNC void relocate_sections(TCCState *s1) {
         // 只解析重定位节需要重定位的 section， sr->sh_info 保存了重定位的目标 section
         s = s1->sections[sr->sh_info];
         relocate_section(s1, s, sr);
-
-#ifndef ELF_OBJ_ONLY
-        if (sr->sh_flags & SHF_ALLOC) {
-            ElfW_Rel *rel;
-            /* relocate relocation table in 'sr' */
-            for_each_elem(sr, 0, rel, ElfW_Rel) {
-                rel->r_offset += s->sh_addr;
-            }
-        }
-#endif
     }
 }
 
@@ -1818,10 +1804,14 @@ struct dyn_inf {
    program headers are filled since they contain info about the layout.
    We do the following ordering: interp, symbol tables, relocations, progbits,
    nobits */
+// 决定加载到内存中的部分的布局。
+// 这必须在程序头被填充之前完成，因为它们包含有关布局的信息。
+// 我们执行以下排序：interp、符号表、重定位、progbits、nobits
 static int sort_sections(TCCState *s1, int *sec_order, Section *interp) {
     Section *s;
     int i, j, k, f, f0, n;
     int nb_sections = s1->nb_sections;
+    // 流出了 nb_sections 大小
     int *sec_cls = sec_order + nb_sections;
 
     for (i = 1; i < nb_sections; i++) {
@@ -1832,7 +1822,7 @@ static int sort_sections(TCCState *s1, int *sec_order, Section *interp) {
                 j = 0x200;
             if (s->sh_flags & SHF_TLS)
                 j += 0x200;
-        } else if (s->sh_name) {
+        } else if (s->sh_name) { // 这是人能看懂哦的吗？
             j = 0x700;
         } else {
             j = 0x900; /* no sh_name: won't go to file */
@@ -1878,6 +1868,7 @@ static int sort_sections(TCCState *s1, int *sec_order, Section *interp) {
         }
         k += j;
 
+        // 排序阶段， 但是完全看不懂排序的nudity是什么
         for (n = i; n > 1 && k < (f = sec_cls[n - 1]); --n)
             sec_cls[n] = f, sec_order[n] = sec_order[n - 1];
         sec_cls[n] = k, sec_order[n] = i;
