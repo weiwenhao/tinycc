@@ -1784,7 +1784,7 @@ static int sort_sections(TCCState *s1, int *sec_order, Section *interp) {
     Section *s;
     int i, j, k, f, f0, n;
     int nb_sections = s1->nb_sections;
-    // 流出了 nb_sections 大小
+    // 指针移动操作
     int *sec_cls = sec_order + nb_sections;
 
     for (i = 1; i < nb_sections; i++) {
@@ -1841,10 +1841,16 @@ static int sort_sections(TCCState *s1, int *sec_order, Section *interp) {
         }
         k += j;
 
+        // k 小于 200 表示
         // 排序阶段， 但是完全看不懂排序的nudity是什么
-        for (n = i; n > 1 && k < (f = sec_cls[n - 1]); --n)
-            sec_cls[n] = f, sec_order[n] = sec_order[n - 1];
-        sec_cls[n] = k, sec_order[n] = i;
+        // 倒序遍历(大-> 小) 选择一个刚好能卡住 k 的位置
+        // 对于每一个比 k 大的值，都将其位置后移一位
+        for (n = i; n > 1 && k < (f = sec_cls[n - 1]); --n) {
+            sec_cls[n] = f; // 前移一位，流出空位，直到遇到一个比 k 的空位
+            sec_order[n] = sec_order[n - 1]; // 位置后移一位， order 中存储了 sh_index
+        }
+        sec_cls[n] = k; // 留在了刚刚好的位置，留给了 k, 但是原来的
+        sec_order[n] = i;
     }
     sec_order[0] = 0;
 
