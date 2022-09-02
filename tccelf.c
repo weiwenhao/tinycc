@@ -1745,36 +1745,9 @@ static int set_sec_sizes(TCCState *s1) {
     /* Allocate strings for section names */
     for (i = 1; i < s1->nb_sections; i++) {
         s = s1->sections[i];
-        if (s->sh_type == SHT_RELX && !(s->sh_flags & SHF_ALLOC)) {
-            /* when generating a DLL, we include relocations but
-               we may patch them */
-            if ((file_type & TCC_OUTPUT_DYN)
-                && (s1->sections[s->sh_info]->sh_flags & SHF_ALLOC)) {
-                int count = prepare_dynamic_rel(s1, s);
-                if (count) {
-                    /* allocate the section */
-                    s->sh_flags |= SHF_ALLOC;
-                    s->sh_size = count * sizeof(ElfW_Rel);
-                    if (!(s1->sections[s->sh_info]->sh_flags & SHF_WRITE))
-                        textrel += count;
-                }
-            }
-        } else if ((s->sh_flags & SHF_ALLOC)
-                   #ifdef TCC_TARGET_ARM
-                   || s->sh_type == SHT_ARM_ATTRIBUTES
-                   #endif
-                   || s1->do_debug) {
-            s->sh_size = s->data_offset;
+        if ((s->sh_flags & SHF_ALLOC) || s1->do_debug) {
+            s->sh_size = s->data_offset; // data_offset 就是当前数据的长度, 进行了段合并之后，size 确实需要重新计算
         }
-
-#ifdef TCC_TARGET_ARM
-        /* XXX: Suppress stack unwinding section. */
-        if (s->sh_type == SHT_ARM_EXIDX) {
-            s->sh_flags = 0;
-            s->sh_size = 0;
-        }
-#endif
-
     }
     return textrel;
 }
@@ -1810,7 +1783,7 @@ static int sort_sections(TCCState *s1, int *sec_order, Section *interp) {
     Section *s;
     int i, j, k, f, f0, n;
     int nb_sections = s1->nb_sections;
-    // 流出了 nb_sections 大小
+    // 指针移动操作
     int *sec_cls = sec_order + nb_sections;
 
     for (i = 1; i < nb_sections; i++) {
@@ -1867,10 +1840,16 @@ static int sort_sections(TCCState *s1, int *sec_order, Section *interp) {
         }
         k += j;
 
+        // k 小于 200 表示
         // 排序阶段， 但是完全看不懂排序的nudity是什么
-        for (n = i; n > 1 && k < (f = sec_cls[n - 1]); --n)
-            sec_cls[n] = f, sec_order[n] = sec_order[n - 1];
-        sec_cls[n] = k, sec_order[n] = i;
+        // 倒序遍历(大-> 小) 选择一个刚好能卡住 k 的位置
+        // 对于每一个比 k 大的值，都将其位置后移一位
+        for (n = i; n > 1 && k < (f = sec_cls[n - 1]); --n) {
+            sec_cls[n] = f; // 前移一位，流出空位，直到遇到一个比 k 的空位
+            sec_order[n] = sec_order[n - 1]; // 位置后移一位， order 中存储了 sh_index
+        }
+        sec_cls[n] = k; // 留在了刚刚好的位置，留给了 k, 但是原来的
+        sec_order[n] = i;
     }
     sec_order[0] = 0;
 
@@ -2471,12 +2450,12 @@ static int elf_output_file(TCCState *s1, const char *filename) {
 
     resolve_common_syms(s1);
 
-    // 构造了 got 段和 plt 段
+    // 构造了 got 段和 plt 段,照抄就行
     build_got_entries(s1, 0);
     version_add(s1);
 
-    textrel = set_sec_sizes(s1);
-    alloc_sec_names(s1, 0);
+    textrel = set_sec_sizes(s1); // 配置段 size
+    alloc_sec_names(s1, 0); // 重新生成段表字符串表
 
     /* this array is used to reorder sections in the output file */
     sec_order = tcc_malloc(sizeof(int) * 2 * s1->nb_sections);
@@ -2610,6 +2589,7 @@ ST_FUNC int tcc_object_type(int fd, ElfW(Ehdr) *h) {
 /* XXX: handle correctly stab (debug) info */
 ST_FUNC int tcc_load_object_file(TCCState *s1,
                                  int fd, unsigned long file_offset) {
+    // Elf64_Ehdr
     ElfW(Ehdr) ehdr;
     ElfW(Shdr) *shdr, *sh;
     int size, i, j, offset, offseti, nb_syms, sym_index, ret, seencompressed;
@@ -2623,8 +2603,9 @@ ST_FUNC int tcc_load_object_file(TCCState *s1,
     Section *s;
 
     lseek(fd, file_offset, SEEK_SET);
-    if (tcc_object_type(fd, &ehdr) != AFF_BINTYPE_REL)
+    if (tcc_object_type(fd, &ehdr) != AFF_BINTYPE_REL) {
         goto fail1;
+    }
     /* test CPU specific stuff */
     if (ehdr.e_ident[5] != ELFDATA2LSB ||
         ehdr.e_machine != EM_TCC_TARGET) {
