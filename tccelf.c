@@ -671,8 +671,7 @@ ST_FUNC int set_elf_sym(Section *s, addr_t value, unsigned long size,
                 /* keep first-found weak definition, ignore subsequents */ // 保持不便
             } else if (sym_vis == STV_HIDDEN || sym_vis == STV_INTERNAL) {
                 /* ignore hidden symbols after */ //
-            } else if ((esym->st_shndx == SHN_COMMON
-                        || esym->st_shndx == bss_section->sh_num)
+            } else if ((esym->st_shndx == SHN_COMMON || esym->st_shndx == bss_section->sh_num)
                        && (shndx < SHN_LORESERVE
                            && shndx != bss_section->sh_num)) {
                 /* data symbol gets precedence over common/bss */
@@ -2694,7 +2693,7 @@ ST_FUNC int tcc_load_object_file(TCCState *s1,
             sh->sh_type != SHT_PREINIT_ARRAY &&
             sh->sh_type != SHT_INIT_ARRAY &&
             sh->sh_type != SHT_FINI_ARRAY &&
-            strcmp(strsec + sh->sh_name, ".stabstr")
+            strcmp(strsec + sh->sh_name, ".stabstr") // 字符串不相等
                 ) {
 //#ifdef TCC_ARM_EABI
 //            sh->sh_type != SHT_ARM_EXIDX &&
@@ -2748,13 +2747,8 @@ ST_FUNC int tcc_load_object_file(TCCState *s1,
         sm_table[i].new_section = 1;
         found:
         if (sh->sh_type != s->sh_type) {
-#if TARGETOS_OpenBSD || TARGETOS_FreeBSD || TARGETOS_NetBSD
-            if (strcmp (s->name, ".eh_frame")) // 两个字符串不相等
-#endif
-            {
-                tcc_error_noabort("invalid section type");
-                goto fail;
-            }
+            tcc_error_noabort("invalid section type");
+            goto fail;
         }
         /* align start of section */
         s->data_offset += -s->data_offset & (sh->sh_addralign - 1);
@@ -2768,7 +2762,7 @@ ST_FUNC int tcc_load_object_file(TCCState *s1,
         size = sh->sh_size;
         if (sh->sh_type != SHT_NOBITS) { // bss段落
             unsigned char *ptr;
-            lseek(fd, file_offset + sh->sh_offset, SEEK_SET);
+            lseek(fd, file_offset + sh->sh_offset, SEEK_SET); // 将 fd 移动到起始位置
             // s 为内存中的数据
             ptr = section_ptr_add(s, size); // ptr = s->data
             full_read(fd, ptr, size); // 链接写入到了 s->data
