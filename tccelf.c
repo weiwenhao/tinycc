@@ -1845,11 +1845,11 @@ static int sort_sections(TCCState *s1, int *sec_order, Section *interp) {
         // 倒序遍历(大-> 小) 选择一个刚好能卡住 k 的位置
         // 对于每一个比 k 大的值，都将其位置后移一位
         for (n = i; n > 1 && k < (f = sec_cls[n - 1]); --n) {
-            sec_cls[n] = f; // 前移一位，流出空位，直到遇到一个比 k 的空位
+            sec_cls[n] = f; // 前移一位，留出空位，直到遇到一个 f 小于 k 的部分，就退出循环
             sec_order[n] = sec_order[n - 1]; // 位置后移一位， order 中存储了 sh_index
         }
-        sec_cls[n] = k; // 留在了刚刚好的位置，留给了 k, 但是原来的
-        sec_order[n] = i;
+        sec_cls[n] = k; // 将 k 放在对应的位置即可
+        sec_order[n] = i; // i 表示 sh_index, n 表示其应该存储的位置, 将下标也存储在对应的位置
     }
     sec_order[0] = 0;
 
@@ -1857,22 +1857,20 @@ static int sort_sections(TCCState *s1, int *sec_order, Section *interp) {
     n = f0 = 0;
     for (i = 1; i < nb_sections; i++) {
         s = s1->sections[sec_order[i]];
-        k = sec_cls[i];
+        k = sec_cls[i];  // i 中存储的是其他 sh 的 k
         f = 0;
         if (k < 0x700) {
-            f = s->sh_flags & (SHF_ALLOC | SHF_WRITE | SHF_EXECINSTR | SHF_TLS);
-#if TARGETOS_NetBSD
-            /* NetBSD only supports 2 PT_LOAD sections.
-               See: https://blog.netbsd.org/tnf/entry/the_first_report_on_lld */
-            if ((f & SHF_WRITE) == 0) f |= SHF_EXECINSTR;
-#else
-            if ((k & 0xfff0) == 0x240) /* RELRO sections */
+            f = s->sh_flags & (SHF_ALLOC | SHF_WRITE | SHF_EXECINSTR | SHF_TLS); // 干啥？
+            if ((k & 0xfff0) == 0x240) {
                 f |= 1 << 4;
-#endif
-            if (f != f0) /* start new header when flags changed or relro */
+            }/* RELRO sections */
+
+            if (f != f0) {
                 f0 = f, ++n, f |= 1 << 8;
+            } /* start new header when flags changed or relro */
         }
-        sec_cls[i] = f;
+
+        sec_cls[i] = f; // cls 在排序阶段存储的是权重值，现在已经排序完了，可以直接使用有意义的值了，所谓有意义的值就是 flags 值
         //printf("ph %d sec %02d : %3X %3X  %8.2X  %04X  %s\n", !!f * n, i, f, k, s->sh_type, s->sh_size, s->name);
     }
     return n;
