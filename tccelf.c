@@ -85,6 +85,7 @@ ST_FUNC void tccelf_new(TCCState *s) {
 }
 
 #ifdef CONFIG_TCC_BCHECK
+
 ST_FUNC void tccelf_bounds_new(TCCState *s) {
     TCCState *s1 = s;
     /* create bounds sections (make ro after relocation done with GNU_RELRO) */
@@ -308,6 +309,7 @@ ST_FUNC void *section_ptr_add(Section *sec, addr_t size) {
 #ifndef ELF_OBJ_ONLY
 
 /* reserve at least 'size' bytes from section start */
+// 保留至少 size 字节
 static void section_reserve(Section *sec, unsigned long size) {
     if (size > sec->data_allocated)
         section_realloc(sec, size);
@@ -948,7 +950,7 @@ static int prepare_dynamic_rel(TCCState *s1, Section *sr) {
 #if defined(TCC_TARGET_I386)
             case R_386_32:
                 if (!get_sym_attr(s1, sym_index, 0)->dyn_index
-                    && ((ElfW(Sym)*)symtab_section->data + sym_index)->st_shndx == SHN_UNDEF) {
+                    && ((ElfW(Sym) *) symtab_section->data + sym_index)->st_shndx == SHN_UNDEF) {
                     /* don't fixup unresolved (weak) symbols */
                     rel->r_info = ELFW(R_INFO)(sym_index, R_386_RELATIVE);
                     break;
@@ -1049,7 +1051,7 @@ static struct sym_attr *put_got_entry(TCCState *s1, int dyn_reloc_type,
     // s_rel 优先使用 got 段， 否则优先使用 .plt 段
     // plt 段为类代码段 -> 存储的啥?
     // got 段位类数据段 -> 存储的啥？
-    s_rel = s1->got;
+//    s_rel = s1->got;
     // 还是进来了一次！
     if (need_plt_entry) {
         if (!s1->plt) {
@@ -1057,12 +1059,12 @@ static struct sym_attr *put_got_entry(TCCState *s1, int dyn_reloc_type,
             s1->plt = new_section(s1, ".plt", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR);
             s1->plt->sh_entsize = 4;
         }
-        s_rel = s1->plt;
+//        s_rel = s1->plt;
     }
 
     /* create the GOT entry */
     got_offset = s1->got->data_offset; // 全局 offset....
-    // got 表 预留一个指针的位置
+    // got 表 预留一个指针的位置, 无论重定位类型是代码段还是符号段
     section_ptr_add(s1->got, PTR_SIZE);
 
     /* Create the GOT relocation that will insert the address of the object or
@@ -1189,6 +1191,7 @@ ST_FUNC void build_got_entries(TCCState *s1, int got_sym) {
                 reloc_type = R_GLOB_DAT; // #define R_X86_64_GLOB_DAT	6	/* Create GOT entry */
             }
 
+            // 第一轮只有代码段重定位在这里进来了，但是代码段重定位也是需要 got 辅助的
             // 第一轮只进行了仅进行了一次代码段的重定位，也就是 R_JMP_SLOT 用来创建 plt entry
             // 后续就开始了数据段的重定位
 
@@ -1213,6 +1216,7 @@ ST_FUNC void build_got_entries(TCCState *s1, int got_sym) {
     if (++pass < 2) {
         goto redo;
     } // 这里对 pass 进行了自增，然后重复重定位？两次 0, 1
+
     /* .rel.plt refers to .got actually */
     if (s1->plt && s1->plt->reloc) {
         s1->plt->reloc->sh_info = s1->got->sh_num;
@@ -1259,6 +1263,7 @@ ST_FUNC void add_array(TCCState *s1, const char *sec, int c) {
 }
 
 #ifdef CONFIG_TCC_BCHECK
+
 ST_FUNC void tcc_add_bcheck(TCCState *s1) {
     if (0 == s1->do_bounds_check)
         return;
@@ -1432,8 +1437,9 @@ ST_FUNC void tcc_add_runtime(TCCState *s1) {
                 tcc_add_btstub(s1);
         }
 #endif
-        if (lpthread)
+        if (lpthread) {
             tcc_add_library_err(s1, "pthread");
+        }
         tcc_add_library_err(s1, "c");
 #ifdef TCC_LIBGCC
         if (!s1->static_link) {
@@ -1483,9 +1489,9 @@ static void tcc_add_linker_symbols(TCCState *s1) {
     int i;
     Section *s;
 
-    set_global_sym(s1, "_etext", text_section, -1);
-    set_global_sym(s1, "_edata", data_section, -1);
-    set_global_sym(s1, "_end", bss_section, -1);
+//    set_global_sym(s1, "_etext", text_section, -1);
+//    set_global_sym(s1, "_edata", data_section, -1);
+//    set_global_sym(s1, "_end", bss_section, -1);
 #if TARGETOS_OpenBSD
     set_global_sym(s1, "__executable_start", NULL, ELF_START_ADDR);
 #endif
@@ -1494,9 +1500,9 @@ static void tcc_add_linker_symbols(TCCState *s1) {
     set_global_sym(s1, "__global_pointer$", data_section, 0x800);
 #endif
     /* horrible new standard ldscript defines */
-    add_init_array_defines(s1, ".preinit_array");
-    add_init_array_defines(s1, ".init_array");
-    add_init_array_defines(s1, ".fini_array");
+//    add_init_array_defines(s1, ".preinit_array");
+//    add_init_array_defines(s1, ".init_array");
+//    add_init_array_defines(s1, ".fini_array");
     /* add start and stop symbols for sections whose name can be
        expressed in C */
     for (i = 1; i < s1->nb_sections; i++) {
@@ -1538,19 +1544,23 @@ ST_FUNC void resolve_common_syms(TCCState *s1) {
     }
 
     /* Now assign linker provided symbols their value.  */
-    tcc_add_linker_symbols(s1);
+//    tcc_add_linker_symbols(s1);
 }
 
 #ifndef ELF_OBJ_ONLY
+
+// 也没干啥，就是往 got 表(值类型表)中写入值
 ST_FUNC void fill_got_entry(TCCState *s1, ElfW_Rel *rel) {
     int sym_index = ELFW(R_SYM) (rel->r_info);
     ElfW(Sym) *sym = &((ElfW(Sym) *) symtab_section->data)[sym_index];
     struct sym_attr *attr = get_sym_attr(s1, sym_index, 0);
     unsigned offset = attr->got_offset;
 
-    if (0 == offset)
+    if (0 == offset) {
         return;
+    }
     section_reserve(s1->got, offset + PTR_SIZE);
+    // 写入数据
 #if PTR_SIZE == 8
     write64le(s1->got->data + offset, sym->st_value);
 #else
@@ -1763,7 +1773,7 @@ struct dyn_inf {
         addr_t rel_size;
     };
 
-    ElfW(Phdr) *phdr;
+    ElfW(Phdr) *phdr; // 程序头表
     int phnum;
     Section *interp;
     Section *note;
@@ -1788,55 +1798,57 @@ static int sort_sections(TCCState *s1, int *sec_order, Section *interp) {
 
     for (i = 1; i < nb_sections; i++) {
         s = s1->sections[i];
-        if (s->sh_flags & SHF_ALLOC) {
-            j = 0x100;
-            if (s->sh_flags & SHF_WRITE)
-                j = 0x200;
-            if (s->sh_flags & SHF_TLS)
-                j += 0x200;
-        } else if (s->sh_name) { // 这是人能看懂哦的吗？
-            j = 0x700;
-        } else {
-            j = 0x900; /* no sh_name: won't go to file */
-        }
-        if (s->sh_type == SHT_SYMTAB || s->sh_type == SHT_DYNSYM) {
-            k = 0x10;
-        } else if (s->sh_type == SHT_STRTAB && strcmp(s->name, ".stabstr")) {
-            k = 0x11;
-            if (i == nb_sections - 1) /* ".shstrtab" assumed to remain last */
-                k = 0xff;
-        } else if (s->sh_type == SHT_HASH) {
-            k = 0x12;
-        } else if (s->sh_type == SHT_RELX) {
-            k = 0x20;
-            if (s1->plt && s == s1->plt->reloc)
-                k = 0x21;
-        } else if (s->sh_type == SHT_PREINIT_ARRAY) {
-            k = 0x41;
-        } else if (s->sh_type == SHT_INIT_ARRAY) {
-            k = 0x42;
-        } else if (s->sh_type == SHT_FINI_ARRAY) {
-            k = 0x43;
+        {
+            if (s->sh_flags & SHF_ALLOC) {
+                j = 0x100;
+                if (s->sh_flags & SHF_WRITE)
+                    j = 0x200;
+                if (s->sh_flags & SHF_TLS)
+                    j += 0x200;
+            } else if (s->sh_name) { // 这是人能看懂哦的吗？
+                j = 0x700;
+            } else {
+                j = 0x900; /* no sh_name: won't go to file */
+            }
+            if (s->sh_type == SHT_SYMTAB || s->sh_type == SHT_DYNSYM) {
+                k = 0x10;
+            } else if (s->sh_type == SHT_STRTAB && strcmp(s->name, ".stabstr")) {
+                k = 0x11;
+                if (i == nb_sections - 1) /* ".shstrtab" assumed to remain last */
+                    k = 0xff;
+            } else if (s->sh_type == SHT_HASH) {
+                k = 0x12;
+            } else if (s->sh_type == SHT_RELX) {
+                k = 0x20;
+                if (s1->plt && s == s1->plt->reloc)
+                    k = 0x21;
+            } else if (s->sh_type == SHT_PREINIT_ARRAY) {
+                k = 0x41;
+            } else if (s->sh_type == SHT_INIT_ARRAY) {
+                k = 0x42;
+            } else if (s->sh_type == SHT_FINI_ARRAY) {
+                k = 0x43;
 #ifdef CONFIG_TCC_BCHECK
-        } else if (s == bounds_section || s == lbounds_section) {
-            k = 0x44;
+            } else if (s == bounds_section || s == lbounds_section) {
+                k = 0x44;
 #endif
-        } else if (s == rodata_section || 0 == strcmp(s->name, ".data.rel.ro")) {
-            k = 0x45;
-        } else if (s->sh_type == SHT_DYNAMIC) {
-            k = 0x46;
-        } else if (s == s1->got) {
-            k = 0x47; /* .got as RELRO needs BIND_NOW in DT_FLAGS */
-        } else {
-            k = 0x50;
-            if (s->sh_type == SHT_NOTE)
-                k = 0x60;
-            if (s->sh_flags & SHF_EXECINSTR)
-                k = 0x70;
-            if (s->sh_type == SHT_NOBITS)
-                k = 0x80;
-            if (s == interp)
-                k = 0x00;
+            } else if (s == rodata_section || 0 == strcmp(s->name, ".data.rel.ro")) {
+                k = 0x45;
+            } else if (s->sh_type == SHT_DYNAMIC) {
+                k = 0x46;
+            } else if (s == s1->got) {
+                k = 0x47; /* .got as RELRO needs BIND_NOW in DT_FLAGS */
+            } else {
+                k = 0x50;
+                if (s->sh_type == SHT_NOTE)
+                    k = 0x60;
+                if (s->sh_flags & SHF_EXECINSTR)
+                    k = 0x70;
+                if (s->sh_type == SHT_NOBITS)
+                    k = 0x80;
+                if (s == interp)
+                    k = 0x00;
+            }
         }
         k += j;
 
@@ -1854,19 +1866,30 @@ static int sort_sections(TCCState *s1, int *sec_order, Section *interp) {
     sec_order[0] = 0;
 
     /* count PT_LOAD headers needed */
+    // n 表示需要 load 的 header 的数量
+    // k < 0x700 表示 PT_LOAD 段
     n = f0 = 0;
     for (i = 1; i < nb_sections; i++) {
         s = s1->sections[sec_order[i]];
         k = sec_cls[i];  // i 中存储的是其他 sh 的 k
         f = 0;
+//        0000 0111 0000 0000 // 9,10, 11
         if (k < 0x700) {
             f = s->sh_flags & (SHF_ALLOC | SHF_WRITE | SHF_EXECINSTR | SHF_TLS); // 干啥？
+            // 忽略掉前4位，只看后面几位，
+            // 只要第 (sh_info link) 和 9 (Section is member of a group.) 位有值
+            // 就表名该 section 为 RELRO sections
+            // 0xfff0 = 1111 1111 1111 0000
+            // 0x240 =  0000 0010 0100 0000
             if ((k & 0xfff0) == 0x240) {
-                f |= 1 << 4;
-            }/* RELRO sections */
+                f |= 1 << 4; // 开启标志位 SHF_MERGE,Might be merged
+            }/* RELRO (Relocation Read-Only) sections */
 
+            // 添加标识位
             if (f != f0) {
-                f0 = f, ++n, f |= 1 << 8;
+                f0 = f; // 修改标志位
+                ++n; // 开启一个新的段, n 表示程序表的段的数量
+                f |= 1 << 8; //  把 00000001 -8-> 10000000 // 第 8 位是预留为孩子，可以随便定义
             } /* start new header when flags changed or relro */
         }
 
@@ -1902,31 +1925,34 @@ static int layout_sections(TCCState *s1, int *sec_order, struct dyn_inf *d) {
     /* compute number of program headers */
     phnum = sort_sections(s1, sec_order, d->interp);
     phfill = 0; /* set to 1 to have dll's with a PT_PHDR */
-    if (d->interp)
+    if (d->interp) {
         phfill = 2;
+    }
     phnum += phfill;
     if (d->note)
         ++phnum;
     if (d->dynamic)
         ++phnum;
     if (d->roinf)
-        ++phnum;
+        ++phnum; // 重定位只读表
     d->phnum = phnum;
-    d->phdr = tcc_mallocz(phnum * sizeof(ElfW(Phdr)));
+    d->phdr = tcc_mallocz(phnum * sizeof(ElfW(Phdr))); // 程序头表
 
     file_offset = 0;
-    if (s1->output_format == TCC_OUTPUT_FORMAT_ELF)
-        file_offset = sizeof(ElfW(Ehdr)) + phnum * sizeof(ElfW(Phdr));
+    if (s1->output_format == TCC_OUTPUT_FORMAT_ELF) {
+        file_offset = sizeof(ElfW(Ehdr)) + phnum * sizeof(ElfW(Phdr)); // 预留出头 + 程序头表表的位置
+    }
 
     s_align = ELF_PAGE_SIZE;
     if (s1->section_align)
         s_align = s1->section_align;
 
     addr = ELF_START_ADDR;
-    if (s1->output_type & TCC_OUTPUT_DYN)
+    if (s1->output_type & TCC_OUTPUT_DYN) {
         addr = 0;
+    }
 
-    if (s1->has_text_addr) {
+    if (s1->has_text_addr) { // 链接选项，应该是用不上的
         addr = s1->text_addr;
         if (0) {
             int a_offset, p_offset;
@@ -1939,27 +1965,32 @@ static int layout_sections(TCCState *s1, int *sec_order, struct dyn_inf *d) {
             file_offset += (a_offset - p_offset);
         }
     }
+
     base = addr;
     /* compute address after headers */
     addr = addr + (file_offset & (s_align - 1));
 
     n = 0;
     for (i = 1; i < s1->nb_sections; i++) {
+        // sec_order[i] 中保存了经过权重排序后需要调换的 section
+        // 简单来说这个 s 就应该出现在这个 segment 位置
         s = s1->sections[sec_order[i]];
-        f = sec_order[i + s1->nb_sections];
+        f = sec_order[i + s1->nb_sections]; // flag 部分
         align = s->sh_addralign - 1;
 
         if (f == 0) { /* no alloc */
-            file_offset = (file_offset + align) & ~align;
+            file_offset = (file_offset + align) & ~align; // ~align 按位取反
             s->sh_offset = file_offset;
             if (s->sh_type != SHT_NOBITS)
                 file_offset += s->sh_size;
             continue;
         }
 
+        // 段可装载，并且 n > 0(n 在此处用来计数程序头表项的数量)
         if ((f & 1 << 8) && n) {
             /* different rwx section flags */
             if (s1->output_format == TCC_OUTPUT_FORMAT_ELF) {
+                // 如果在 page 的中间，我们在内存中复制页面，这样一个副本是 RX，另一个是 RW
                 /* if in the middle of a page, w e duplicate the page in
                    memory so that one copy is RX and the other is RW */
                 if ((addr & (s_align - 1)) != 0)
@@ -1971,13 +2002,17 @@ static int layout_sections(TCCState *s1, int *sec_order, struct dyn_inf *d) {
 
         tmp = addr;
         addr = (addr + align) & ~align;
-        file_offset += (int) (addr - tmp);
+        file_offset += (int) (addr - tmp); // 对齐差值，多个 section 共用一个 page 从而可以节省内存
         s->sh_offset = file_offset;
         s->sh_addr = addr;
 
+        // 位移优先级高于按位与
+        // x = 1 << 8 =  00000000 00000000 00000000 100000000
+        // f &  x  = 最终判断第 8 位的值是否为 1, 为 1 表示需要创建一个新的 program header
+        // pt load 段写入(可装载段)
         if (f & 1 << 8) {
             /* set new program header */
-            ph = &d->phdr[phfill + n];
+            ph = &d->phdr[phfill + n]; // ph fill 看起来像是预留的段空间
             ph->p_type = PT_LOAD;
             ph->p_align = s_align;
             ph->p_flags = PF_R;
@@ -2003,6 +2038,7 @@ static int layout_sections(TCCState *s1, int *sec_order, struct dyn_inf *d) {
             ++n;
         }
 
+        // 判断当前 section 是否为 relocation read only
         if (f & 1 << 4) {
             Section *roinf = &d->_roinf;
             if (roinf->sh_size == 0) {
@@ -2014,6 +2050,7 @@ static int layout_sections(TCCState *s1, int *sec_order, struct dyn_inf *d) {
         }
 
         addr += s->sh_size;
+        // nobit 不需要真的申请文件位置，比如 data [1000] 你都没有初始化，直接在数据段申请 1000 个空间，那进程的空间就太大了
         if (s->sh_type != SHT_NOBITS)
             file_offset += s->sh_size;
 
@@ -2450,7 +2487,7 @@ static int elf_output_file(TCCState *s1, const char *filename) {
 
     // 构造了 got 段和 plt 段,照抄就行
     build_got_entries(s1, 0);
-    version_add(s1);
+//    version_add(s1);
 
     textrel = set_sec_sizes(s1); // 配置段 size
     alloc_sec_names(s1, 0); // 重新生成段表字符串表
@@ -2473,6 +2510,7 @@ static int elf_output_file(TCCState *s1, const char *filename) {
     relocate_sections(s1);
 
     /* Perform relocation to GOT or PLT entries */
+    // 对 GOT 或 PLT 条目执行重定位
     fill_got(s1);
 
     /* Create the ELF file with name 'filename' */
@@ -2486,6 +2524,7 @@ static int elf_output_file(TCCState *s1, const char *filename) {
 #endif /* ndef ELF_OBJ_ONLY */
 
 /* Allocate strings for section names */
+// 为部分名称分配字符串
 static void alloc_sec_names(TCCState *s1, int is_obj) {
     int i;
     Section *s, *strsec;
