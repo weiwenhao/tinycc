@@ -842,7 +842,7 @@ ST_FUNC void relocate_syms(TCCState *s1, Section *symtab, int do_resolve) {
     int sym_bind, sh_num;
     const char *name;
 
-    for_each_elem(symtab, 1, sym, ElfW(Sym)) {
+    for (sym = (Elf64_Sym *) symtab->data + 1; sym < (Elf64_Sym *) (symtab->data + symtab->data_offset); sym++) {
         sh_num = sym->st_shndx;
         if (sh_num == SHN_UNDEF) {
             // 0x5555557e5b06 "_DYNAMIC" 唯一未定义的符号就是这个，还是个 STB_WEAK 类型的符号
@@ -878,9 +878,9 @@ static void relocate_section(TCCState *s1, Section *s, Section *sr) {
     int type, sym_index;
     unsigned char *ptr;
     addr_t tgt, addr;
-    int is_dwarf = s->sh_num >= s1->dwlo && s->sh_num < s1->dwhi;
+//    int is_dwarf = s->sh_num >= s1->dwlo && s->sh_num < s1->dwhi;
 
-    qrel = (ElfW_Rel *) sr->data;
+//    qrel = (ElfW_Rel *) sr->data;
     for_each_elem(sr, 0, rel, ElfW_Rel) { // 遍历重定位表项，进行？？
         // s 为目标端, s->data 为段起始指针，其实就是 0, rel->r_offset 是基于目标段的偏移
         // 但是总的来说 ptr 都是待修正的符号的位置
@@ -1779,7 +1779,8 @@ struct dyn_inf {
     Section *note;
 
     /* read only segment mapping for GNU_RELRO */
-    Section _roinf, *roinf;
+    Section _roinf;
+    Section *roinf;
 };
 
 /* Decide the layout of sections loaded in memory. This must be done before
@@ -1944,27 +1945,27 @@ static int layout_sections(TCCState *s1, int *sec_order, struct dyn_inf *d) {
     }
 
     s_align = ELF_PAGE_SIZE;
-    if (s1->section_align)
-        s_align = s1->section_align;
+//    if (s1->section_align) // 链接配置
+//        s_align = s1->section_align;
 
     addr = ELF_START_ADDR;
-    if (s1->output_type & TCC_OUTPUT_DYN) {
-        addr = 0;
-    }
+//    if (s1->output_type & TCC_OUTPUT_DYN) {
+//        addr = 0;
+//    }
 
-    if (s1->has_text_addr) { // 链接选项，应该是用不上的
-        addr = s1->text_addr;
-        if (0) {
-            int a_offset, p_offset;
-            /* we ensure that (addr % ELF_PAGE_SIZE) == file_offset %
-               ELF_PAGE_SIZE */
-            a_offset = (int) (addr & (s_align - 1));
-            p_offset = file_offset & (s_align - 1);
-            if (a_offset < p_offset)
-                a_offset += s_align;
-            file_offset += (a_offset - p_offset);
-        }
-    }
+//    if (s1->has_text_addr) { // 链接选项，应该是用不上的
+//        addr = s1->text_addr;
+//        if (0) {
+//            int a_offset, p_offset;
+//            /* we ensure that (addr % ELF_PAGE_SIZE) == file_offset %
+//               ELF_PAGE_SIZE */
+//            a_offset = (int) (addr & (s_align - 1));
+//            p_offset = file_offset & (s_align - 1);
+//            if (a_offset < p_offset)
+//                a_offset += s_align;
+//            file_offset += (a_offset - p_offset);
+//        }
+//    }
 
     base = addr;
     /* compute address after headers */
@@ -2039,15 +2040,15 @@ static int layout_sections(TCCState *s1, int *sec_order, struct dyn_inf *d) {
         }
 
         // 判断当前 section 是否为 relocation read only
-        if (f & 1 << 4) {
-            Section *roinf = &d->_roinf;
-            if (roinf->sh_size == 0) {
-                roinf->sh_offset = s->sh_offset;
-                roinf->sh_addr = s->sh_addr;
-                roinf->sh_addralign = 1;
-            }
-            roinf->sh_size = (addr - roinf->sh_addr) + s->sh_size;
-        }
+//        if (f & 1 << 4) {
+//            Section *roinf = &d->_roinf;
+//            if (roinf->sh_size == 0) {
+//                roinf->sh_offset = s->sh_offset;
+//                roinf->sh_addr = s->sh_addr;
+//                roinf->sh_addralign = 1;
+//            }
+//            roinf->sh_size = (addr - roinf->sh_addr) + s->sh_size;
+//        }
 
         addr += s->sh_size;
         // nobit 不需要真的申请文件位置，比如 data [1000] 你都没有初始化，直接在数据段申请 1000 个空间，那进程的空间就太大了
@@ -2059,14 +2060,14 @@ static int layout_sections(TCCState *s1, int *sec_order, struct dyn_inf *d) {
     }
 
     /* Fill other headers */
-    if (d->note)
-        fill_phdr(++ph, PT_NOTE, d->note);
-    if (d->dynamic)
-        fill_phdr(++ph, PT_DYNAMIC, d->dynamic)->p_flags |= PF_W;
-    if (d->roinf)
-        fill_phdr(++ph, PT_GNU_RELRO, d->roinf)->p_flags |= PF_W;
-    if (d->interp)
-        fill_phdr(&d->phdr[1], PT_INTERP, d->interp);
+//    if (d->note)
+//        fill_phdr(++ph, PT_NOTE, d->note);
+//    if (d->dynamic)
+//        fill_phdr(++ph, PT_DYNAMIC, d->dynamic)->p_flags |= PF_W;
+//    if (d->roinf)
+//        fill_phdr(++ph, PT_GNU_RELRO, d->roinf)->p_flags |= PF_W;
+//    if (d->interp)
+//        fill_phdr(&d->phdr[1], PT_INTERP, d->interp);
     if (phfill) {
         ph = &d->phdr[0];
         ph->p_offset = sizeof(ElfW(Ehdr));
@@ -2379,7 +2380,7 @@ static int tidy_section_headers(TCCState *s1, int *sec_order) {
             ++nnew;
         } else {
             backmap[sec_order[i]] = 0;
-            snew[--l] = s;
+            snew[--l] = s; // 带废弃的 section 直接丢在了 new sections 的结尾部分, 其未统计数量
         }
     }
     for (i = 0; i < nnew; i++) {
@@ -2393,12 +2394,12 @@ static int tidy_section_headers(TCCState *s1, int *sec_order) {
 
     for_each_elem(symtab_section, 1, sym, ElfW(Sym)) if (sym->st_shndx != SHN_UNDEF && sym->st_shndx < SHN_LORESERVE)
             sym->st_shndx = backmap[sym->st_shndx];
-    if (!s1->static_link) {
-        for_each_elem(s1->dynsym, 1, sym, ElfW(Sym)) if (sym->st_shndx != SHN_UNDEF && sym->st_shndx < SHN_LORESERVE)
-                sym->st_shndx = backmap[sym->st_shndx];
-    }
+//    if (!s1->static_link) {
+//        for_each_elem(s1->dynsym, 1, sym, ElfW(Sym)) if (sym->st_shndx != SHN_UNDEF && sym->st_shndx < SHN_LORESERVE)
+//                sym->st_shndx = backmap[sym->st_shndx];
+//    }
     for (i = 0; i < s1->nb_sections; i++)
-        sec_order[i] = i;
+        sec_order[i] = i; // 回归本源
     tcc_free(s1->sections);
     s1->sections = snew;
     tcc_free(backmap);
