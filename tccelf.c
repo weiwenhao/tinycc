@@ -2392,8 +2392,12 @@ static int tidy_section_headers(TCCState *s1, int *sec_order) {
         }
     }
 
-    for_each_elem(symtab_section, 1, sym, ElfW(Sym)) if (sym->st_shndx != SHN_UNDEF && sym->st_shndx < SHN_LORESERVE)
+    for_each_elem(symtab_section, 1, sym, ElfW(Sym)) {
+        if (sym->st_shndx != SHN_UNDEF && sym->st_shndx < SHN_LORESERVE) {
             sym->st_shndx = backmap[sym->st_shndx];
+        }
+    }
+
 //    if (!s1->static_link) {
 //        for_each_elem(s1->dynsym, 1, sym, ElfW(Sym)) if (sym->st_shndx != SHN_UNDEF && sym->st_shndx < SHN_LORESERVE)
 //                sym->st_shndx = backmap[sym->st_shndx];
