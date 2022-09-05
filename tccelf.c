@@ -66,7 +66,7 @@ ST_FUNC void tccelf_new(TCCState *s) {
     text_section = new_section(s, ".text", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR);
     data_section = new_section(s, ".data", SHT_PROGBITS, SHF_ALLOC | SHF_WRITE);
     /* create ro data section (make ro after relocation done with GNU_RELRO) */
-    rodata_section = new_section(s, rdata, SHT_PROGBITS, shf_RELRO);
+//    rodata_section = new_section(s, rdata, SHT_PROGBITS, shf_RELRO);
     bss_section = new_section(s, ".bss", SHT_NOBITS, SHF_ALLOC | SHF_WRITE);
     common_section = new_section(s, ".common", SHT_NOBITS, SHF_PRIVATE);
     common_section->sh_num = SHN_COMMON;
@@ -475,16 +475,16 @@ ST_FUNC addr_t get_sym_addr(TCCState *s1, const char *name, int err, int forc) {
     int sym_index;
     ElfW(Sym) *sym;
     char buf[256];
-    if (forc && s1->leading_underscore
-#ifdef TCC_TARGET_PE
-        /* win32-32bit stdcall symbols always have _ already */
-        && !strchr(name, '@')
-#endif
-            ) {
-        buf[0] = '_';
-        pstrcpy(buf + 1, sizeof(buf) - 1, name);
-        name = buf;
-    }
+//    if (forc && s1->leading_underscore
+//#ifdef TCC_TARGET_PE
+//        /* win32-32bit stdcall symbols always have _ already */
+//        && !strchr(name, '@')
+//#endif
+//            ) {
+//        buf[0] = '_';
+//        pstrcpy(buf + 1, sizeof(buf) - 1, name);
+//        name = buf;
+//    }
     sym_index = find_elf_sym(s1->symtab, name);
     sym = &((ElfW(Sym) *) s1->symtab->data)[sym_index];
     if (!sym_index || sym->st_shndx == SHN_UNDEF) {
@@ -2486,7 +2486,7 @@ static int elf_output_file(TCCState *s1, const char *filename) {
     dyninf.roinf = &dyninf._roinf;
 
     /* if linking, also link in runtime libraries (libc, libgcc, etc.) */
-    tcc_add_runtime(s1);
+//    tcc_add_runtime(s1);
 
     resolve_common_syms(s1);
 
