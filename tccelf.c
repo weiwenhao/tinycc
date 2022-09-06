@@ -2871,6 +2871,7 @@ ST_FUNC int tcc_load_object_file(TCCState *s1,
         }
         /* add symbol */
         name = strtab + sym->st_name; // 取出符号表的字符并将符号添加到全局符号表中。 s1->symtab_section
+//        printf("sym_name:%s\n", name);
         // sym_index 表示在全局符号表中的索引，进行了弱符号处理
         sym_index = set_elf_sym(symtab_section, sym->st_value, sym->st_size,
                                 sym->st_info, sym->st_other,
