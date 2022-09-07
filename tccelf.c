@@ -1925,17 +1925,17 @@ static int layout_sections(TCCState *s1, int *sec_order, struct dyn_inf *d) {
 
     /* compute number of program headers */
     phnum = sort_sections(s1, sec_order, d->interp);
-    phfill = 0; /* set to 1 to have dll's with a PT_PHDR */
-    if (d->interp) {
-        phfill = 2;
-    }
-    phnum += phfill;
-    if (d->note)
-        ++phnum;
-    if (d->dynamic)
-        ++phnum;
-    if (d->roinf)
-        ++phnum; // 重定位只读表
+//    phfill = 0; /* set to 1 to have dll's with a PT_PHDR */
+//    if (d->interp) {
+//        phfill = 2;
+//    }
+//    phnum += phfill;
+//    if (d->note)
+//        ++phnum;
+//    if (d->dynamic)
+//        ++phnum;
+//    if (d->roinf)
+//        ++phnum; // 重定位只读表
     d->phnum = phnum;
     d->phdr = tcc_mallocz(phnum * sizeof(ElfW(Phdr))); // 程序头表
 
@@ -2013,7 +2013,7 @@ static int layout_sections(TCCState *s1, int *sec_order, struct dyn_inf *d) {
         // pt load 段写入(可装载段)
         if (f & 1 << 8) {
             /* set new program header */
-            ph = &d->phdr[phfill + n]; // ph fill 看起来像是预留的段空间
+            ph = &d->phdr[n]; // ph fill 看起来像是预留的段空间
             ph->p_type = PT_LOAD;
             ph->p_align = s_align;
             ph->p_flags = PF_R;
@@ -2068,14 +2068,14 @@ static int layout_sections(TCCState *s1, int *sec_order, struct dyn_inf *d) {
 //        fill_phdr(++ph, PT_GNU_RELRO, d->roinf)->p_flags |= PF_W;
 //    if (d->interp)
 //        fill_phdr(&d->phdr[1], PT_INTERP, d->interp);
-    if (phfill) {
-        ph = &d->phdr[0];
-        ph->p_offset = sizeof(ElfW(Ehdr));
-        ph->p_vaddr = base + ph->p_offset;
-        ph->p_filesz = phnum * sizeof(ElfW(Phdr));
-        ph->p_align = 4;
-        fill_phdr(ph, PT_PHDR, NULL);
-    }
+//    if (phfill) {
+//        ph = &d->phdr[0];
+//        ph->p_offset = sizeof(ElfW(Ehdr));
+//        ph->p_vaddr = base + ph->p_offset;
+//        ph->p_filesz = phnum * sizeof(ElfW(Phdr));
+//        ph->p_align = 4;
+//        fill_phdr(ph, PT_PHDR, NULL);
+//    }
     return file_offset;
 }
 
@@ -2799,26 +2799,26 @@ ST_FUNC int tcc_load_object_file(TCCState *s1,
     // 如果存在 stab 调试段(只允许一组)
     // 响应的条数数据已经在上面的 concatenate 部分链接了，由于从小表合到了大表中，n_strx
     // 字符串表索引需要修改一下，改成从 new stabstr_index offset 开始算, 原来肯定是从 0 开始算的
-    if (stab_index && stabstr_index) {
-        Stab_Sym *a, *b;
-        unsigned o;
-        s = sm_table[stab_index].s; // 取出段信息(以存在的)
-        a = (Stab_Sym *) (s->data + sm_table[stab_index].offset); // s->data 肯定等于 0
-        b = (Stab_Sym *) (s->data + s->data_offset);
-        o = sm_table[stabstr_index].offset; // 0 表示 新的字符串表在全局字符串表中的起始点
-        // a := sm_table[stab_index].offset = s->data_offset
-        // b := s->data_offset + (stab entire size)
-        //  a  -->                  b
-        //  ⬇️                     ⬇️
-        // [stab1][stab2][stab3][stab4]
-        // [str1][str2   ][str3  ][str4         ]
-        while (a < b) {
-            if (a->n_strx) { // 这是在干嘛, shr 中的 stab 数据也没有写进去到 data 中呀?
-                a->n_strx += o; // 所有的 n_strx 从 new stabstr_index offset 从新算,也就是就的的 stabstr size 开始算
-            }
-            a = a + 1; // a + 1 表示 a 像右移动了 sizeof(Stab_Sym) 长度的数据,并不是 a 移动了一个字节的意思
-        }
-    }
+//    if (stab_index && stabstr_index) {
+//        Stab_Sym *a, *b;
+//        unsigned o;
+//        s = sm_table[stab_index].s; // 取出段信息(以存在的)
+//        a = (Stab_Sym *) (s->data + sm_table[stab_index].offset); // s->data 肯定等于 0
+//        b = (Stab_Sym *) (s->data + s->data_offset);
+//        o = sm_table[stabstr_index].offset; // 0 表示 新的字符串表在全局字符串表中的起始点
+//        // a := sm_table[stab_index].offset = s->data_offset
+//        // b := s->data_offset + (stab entire size)
+//        //  a  -->                  b
+//        //  ⬇️                     ⬇️
+//        // [stab1][stab2][stab3][stab4]
+//        // [str1][str2   ][str3  ][str4         ]
+//        while (a < b) {
+//            if (a->n_strx) { // 这是在干嘛, shr 中的 stab 数据也没有写进去到 data 中呀?
+//                a->n_strx += o; // 所有的 n_strx 从 new stabstr_index offset 从新算,也就是就的的 stabstr size 开始算
+//            }
+//            a = a + 1; // a + 1 表示 a 像右移动了 sizeof(Stab_Sym) 长度的数据,并不是 a 移动了一个字节的意思
+//        }
+//    }
 
     /* second short pass to update sh_link and sh_info fields of new
        sections */
@@ -2845,22 +2845,22 @@ ST_FUNC int tcc_load_object_file(TCCState *s1,
             sym->st_shndx < SHN_LORESERVE) {
 
             sm = &sm_table[sym->st_shndx]; // st_shndx label 和 var_decl 都属于符号， label 通常在 text 段， var_decl 通常在 data 段，当然也可能在自定义段
-            if (sm->link_once) {
-                /* if a symbol is in a link once section, we use the
-                   already defined symbol. It is very important to get
-                   correct relocations */
-                if (ELFW(ST_BIND)(sym->st_info) != STB_LOCAL) {
-
-                    name = strtab + sym->st_name; // strtab 为 string
-                    sym_index = find_elf_sym(symtab_section, name);
-                    // 在已经 link 到的全局全局符号表中寻找改符号，如果真的找到了该符号就将其在符号表中的索引记录下来就行
-                    // 就记录一条 sym_index:
-                    if (sym_index) {
-                        old_to_new_syms[i] = sym_index;
-                    }
-                }
-                continue;
-            }
+//            if (sm->link_once) {
+//                /* if a symbol is in a link once section, we use the
+//                   already defined symbol. It is very important to get
+//                   correct relocations */
+//                if (ELFW(ST_BIND)(sym->st_info) != STB_LOCAL) {
+//
+//                    name = strtab + sym->st_name; // strtab 为 string
+//                    sym_index = find_elf_sym(symtab_section, name);
+//                    // 在已经 link 到的全局全局符号表中寻找改符号，如果真的找到了该符号就将其在符号表中的索引记录下来就行
+//                    // 就记录一条 sym_index:
+//                    if (sym_index) {
+//                        old_to_new_syms[i] = sym_index;
+//                    }
+//                }
+//                continue;
+//            }
             /* if no corresponding section added, no need to add symbol */
             if (!sm->s)
                 continue;
@@ -2915,12 +2915,12 @@ ST_FUNC int tcc_load_object_file(TCCState *s1,
                     sym_index = old_to_new_syms[sym_index]; // 上面对 SHN_UNDEF 符号已经进行了合适的符号处理，这里可以直接重定位了
                     /* ignore link_once in rel section. */
                     if (!sym_index && !sm_table[sh->sh_info].link_once
-#ifdef TCC_TARGET_ARM
-                        && type != R_ARM_V4BX
-#elif defined TCC_TARGET_RISCV64
-                        && type != R_RISCV_ALIGN
-                        && type != R_RISCV_RELAX
-#endif
+//#ifdef TCC_TARGET_ARM
+//                        && type != R_ARM_V4BX
+//#elif defined TCC_TARGET_RISCV64
+//                        && type != R_RISCV_ALIGN
+//                        && type != R_RISCV_RELAX
+//#endif
                             ) {
                         invalid_reloc:
                         tcc_error_noabort("Invalid relocation entry [%2d] '%s' @ %.8x",
@@ -2930,18 +2930,18 @@ ST_FUNC int tcc_load_object_file(TCCState *s1,
                     rel->r_info = ELFW(R_INFO)(sym_index, type); // 使用新的 index 替换
                     /* offset the relocation offset */
                     rel->r_offset += offseti; // 其所在的目标段也被调整了，所以这里进行一次 patch
-#ifdef TCC_TARGET_ARM
-                    /* Jumps and branches from a Thumb code to a PLT entry need
-                       special handling since PLT entries are ARM code.
-                       Unconditional bl instructions referencing PLT entries are
-                       handled by converting these instructions into blx
-                       instructions. Other case of instructions referencing a PLT
-                       entry require to add a Thumb stub before the PLT entry to
-                       switch to ARM mode. We set bit plt_thumb_stub of the
-                       attribute of a symbol to indicate such a case. */
-                    if (type == R_ARM_THM_JUMP24)
-                        get_sym_attr(s1, sym_index, 1)->plt_thumb_stub = 1;
-#endif
+//#ifdef TCC_TARGET_ARM
+//                    /* Jumps and branches from a Thumb code to a PLT entry need
+//                       special handling since PLT entries are ARM code.
+//                       Unconditional bl instructions referencing PLT entries are
+//                       handled by converting these instructions into blx
+//                       instructions. Other case of instructions referencing a PLT
+//                       entry require to add a Thumb stub before the PLT entry to
+//                       switch to ARM mode. We set bit plt_thumb_stub of the
+//                       attribute of a symbol to indicate such a case. */
+//                    if (type == R_ARM_THM_JUMP24)
+//                        get_sym_attr(s1, sym_index, 1)->plt_thumb_stub = 1;
+//#endif
                 }
                 break;
             default:
